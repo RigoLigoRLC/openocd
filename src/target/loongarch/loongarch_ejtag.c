@@ -5,7 +5,11 @@
  *   Initial LoongArch support is based on MIPS code.                      *
  ***************************************************************************/
 
-#include "loongarch_ejtag.h"
+#ifdef HAVE_CONFIG_H
+#include "config.h"
+#endif
+
+#include "loongarch64_pracc.h"
 #include "loongarch64.h"
 
 void loongarch_ejtag_set_instr(struct loongarch_ejtag *ejtag_info, uint32_t new_instr)
@@ -13,7 +17,13 @@ void loongarch_ejtag_set_instr(struct loongarch_ejtag *ejtag_info, uint32_t new_
 	assert(ejtag_info->tap);
 	struct jtag_tap *tap = ejtag_info->tap;
 
-	if (buf_get_u32(tap->cur_instr, 0, tap->ir_length) != new_instr) {
+	/*
+	 * Quirk: At least as tested with LS2K0300: you MUST write IR before 
+	 * reading/writing DR, otherwise you'll read back garbage data.
+	 * The logic is kept and awaiting whether we can add a flag to apply
+	 * this quirk fix only for the chips with this bug.
+	 */
+	if (true || buf_get_u32(tap->cur_instr, 0, tap->ir_length) != new_instr) {
 
 		struct scan_field field;
 		field.num_bits = tap->ir_length;
@@ -25,12 +35,39 @@ void loongarch_ejtag_set_instr(struct loongarch_ejtag *ejtag_info, uint32_t new_
 		field.in_value = NULL;
 
 		jtag_add_ir_scan(tap, &field, TAP_IDLE);
+		jtag_add_runtest(50, TAP_IDLE);
 	}
 }
 
 int loongarch_ejtag_drscan_64(struct loongarch_ejtag *ejtag_info, uint64_t *data)
 {
-	return 0;
+	struct jtag_tap *tap = ejtag_info->tap;
+	if (!tap) {
+		LOG_ERROR("ejtag_info->tap is NULL!");
+		return ERROR_FAIL;
+	}
+
+	struct scan_field field;
+	uint8_t t[8] = { 0 }, r[8];
+	int retval;
+
+	field.num_bits = 64;
+	field.out_value = t;
+	buf_set_u64(t, 0, field.num_bits, *data);
+	field.in_value = r;
+
+	jtag_add_dr_scan(tap, 1, &field, TAP_IDLE);
+	retval = jtag_execute_queue();
+	if (retval != ERROR_OK) {
+		LOG_ERROR("register read failed");
+		return retval;
+	}
+
+	*data = buf_get_u64(field.in_value, 0, 64);
+
+	keep_alive();
+
+	return ERROR_OK;
 }
 
 static void loongarch_ejtag_drscan_32_queued(struct loongarch_ejtag *ejtag_info,
@@ -52,7 +89,7 @@ static void loongarch_ejtag_drscan_32_queued(struct loongarch_ejtag *ejtag_info,
 	keep_alive();
 }
 
-void loongarch_ejtag_drscan_32_out(struct loongarch_ejtag *ejtag_info, uint32_t *data)
+void loongarch_ejtag_drscan_32_out(struct loongarch_ejtag *ejtag_info, uint32_t data)
 {
 	loongarch_ejtag_drscan_32_queued(ejtag_info, data, NULL);
 }
@@ -104,21 +141,24 @@ int loongarch_ejtag_init(struct loongarch_ejtag *ejtag_info)
 int loongarch_ejtag_enter_debug(struct loongarch_ejtag *ejtag_info)
 {
 	uint32_t ejtag_ctrl;
-	loongarch_ejtag_set_instr(ejtag_ctrl, LAEJTAG_INST_CONTROL);
+	int retry_count;
 
-	/* set debug break bit */
-	ejtag_ctrl = ejtag_info->ejtag_ctrl | LAEJTAG_CTRL_JTAGBRK;
-	loongarch_ejtag_drscan_32(ejtag_info, &ejtag_ctrl);
-	
-	/* See if we stopped processor */
-	ejtag_ctrl = ejtag_info->ejtag_ctrl;
-	loongarch_ejtag_drscan_32(ejtag_info, &ejtag_ctrl);
-	LOG_DEBUG("enter_debug: control=0x%08" PRIx32 "", ejtag_ctrl);
-	if ((ejtag_ctrl & LAEJTAG_CTRL_DM))
-		goto error;
+	// Quirk: May require retrying a few times before DM bit can be set
+	for (retry_count = 5; retry_count != 0; --retry_count) {
+		loongarch_ejtag_set_instr(ejtag_info, LAEJTAG_INST_CONTROL);
 
-	return ERROR_OK;
-error:
+		/* set debug break bit */
+		ejtag_ctrl = LAEJTAG_CTRL_JTAGBRK | LAEJTAG_CTRL_PRACC
+			| LAEJTAG_CTRL_PROBEN | LAEJTAG_CTRL_PROBTRAP;
+		loongarch_ejtag_drscan_32(ejtag_info, &ejtag_ctrl);
+		
+		/* See if we stopped processor */
+		LOG_DEBUG("enter_debug: control=0x%08" PRIx32 "", ejtag_ctrl);
+		if (ejtag_ctrl & LAEJTAG_CTRL_DM) {
+			return ERROR_OK;
+		}
+	}
+
 	LOG_ERROR("enter_debug: Failed to enter Debug Mode!");
 	return ERROR_FAIL;
 }
@@ -127,6 +167,9 @@ int loongarch_ejtag_exit_debug(struct loongarch_ejtag *ejtag_info)
 {
 	const uint32_t code[] = {
 		LOONG64_ERTN,
+		LOONG64_ERTN,
 	};
-	// TODO: PrAcc
+	
+	return loongarch64_pracc_exec(ejtag_info, ARRAY_SIZE(code), code, 0,
+		NULL, 0, NULL);
 }

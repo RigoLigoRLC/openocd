@@ -100,6 +100,7 @@ static struct target_type *target_types[] = {
 	&fa526_target,
 	&feroceon_target,
 	&hla_target,
+	&loongarch64_target,
 	&ls1_sap_target,
 	&mem_ap_target,
 	&mips_m4k_target,
@@ -112,6 +113,7 @@ static struct target_type *target_types[] = {
 	&testee_target,
 	&xscale_target,
 	&xtensa_chip_target,
+	NULL,
 };
 
 struct target *all_targets;

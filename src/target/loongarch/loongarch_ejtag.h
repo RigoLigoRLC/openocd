@@ -39,7 +39,7 @@ struct loongarch_ejtag {
 void loongarch_ejtag_set_instr(struct loongarch_ejtag *ejtag_info, uint32_t new_instr);
 
 int loongarch_ejtag_drscan_64(struct loongarch_ejtag *ejtag_info, uint64_t *data);
-void loongarch_ejtag_drscan_32_out(struct loongarch_ejtag *ejtag_info, uint32_t *data);
+void loongarch_ejtag_drscan_32_out(struct loongarch_ejtag *ejtag_info, uint32_t data);
 int loongarch_ejtag_drscan_32(struct loongarch_ejtag *ejtag_info, uint32_t *data);
 
 int loongarch_ejtag_get_idcode(struct loongarch_ejtag *ejtag_info);

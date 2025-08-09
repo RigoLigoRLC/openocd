@@ -352,6 +352,7 @@ extern struct target_type esp32_target;
 extern struct target_type fa526_target;
 extern struct target_type feroceon_target;
 extern struct target_type hla_target;
+extern struct target_type loongarch64_target;
 extern struct target_type ls1_sap_target;
 extern struct target_type mem_ap_target;
 extern struct target_type mips_m4k_target;
