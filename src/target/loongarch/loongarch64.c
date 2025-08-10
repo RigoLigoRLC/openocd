@@ -15,15 +15,232 @@
 #include "loongarch64.h"
 #include "target/target_type.h"
 
+/*******************************************************************************
+ *       Registers
+ ******************************************************************************/
+
+static const struct {
+	unsigned int id;
+	const char *name;
+	enum reg_type type;
+	const char *feature;
+	const char *group;
+} loongarch64_regs[] = {
+	{  0,   "r0", REG_TYPE_UINT64, "org.gnu.gdb.loongarch.base", "CPU" },
+	{  1,   "r1", REG_TYPE_UINT64, "org.gnu.gdb.loongarch.base", "CPU" },
+	{  2,   "r2", REG_TYPE_UINT64, "org.gnu.gdb.loongarch.base", "CPU" },
+	{  3,   "r3", REG_TYPE_UINT64, "org.gnu.gdb.loongarch.base", "CPU" },
+	{  4,   "r4", REG_TYPE_UINT64, "org.gnu.gdb.loongarch.base", "CPU" },
+	{  5,   "r5", REG_TYPE_UINT64, "org.gnu.gdb.loongarch.base", "CPU" },
+	{  6,   "r6", REG_TYPE_UINT64, "org.gnu.gdb.loongarch.base", "CPU" },
+	{  7,   "r7", REG_TYPE_UINT64, "org.gnu.gdb.loongarch.base", "CPU" },
+	{  8,   "r8", REG_TYPE_UINT64, "org.gnu.gdb.loongarch.base", "CPU" },
+	{  9,   "r9", REG_TYPE_UINT64, "org.gnu.gdb.loongarch.base", "CPU" },
+	{ 10,  "r10", REG_TYPE_UINT64, "org.gnu.gdb.loongarch.base", "CPU" },
+	{ 11,  "r11", REG_TYPE_UINT64, "org.gnu.gdb.loongarch.base", "CPU" },
+	{ 12,  "r12", REG_TYPE_UINT64, "org.gnu.gdb.loongarch.base", "CPU" },
+	{ 13,  "r13", REG_TYPE_UINT64, "org.gnu.gdb.loongarch.base", "CPU" },
+	{ 14,  "r14", REG_TYPE_UINT64, "org.gnu.gdb.loongarch.base", "CPU" },
+	{ 15,  "r15", REG_TYPE_UINT64, "org.gnu.gdb.loongarch.base", "CPU" },
+	{ 16,  "r16", REG_TYPE_UINT64, "org.gnu.gdb.loongarch.base", "CPU" },
+	{ 17,  "r17", REG_TYPE_UINT64, "org.gnu.gdb.loongarch.base", "CPU" },
+	{ 18,  "r18", REG_TYPE_UINT64, "org.gnu.gdb.loongarch.base", "CPU" },
+	{ 19,  "r19", REG_TYPE_UINT64, "org.gnu.gdb.loongarch.base", "CPU" },
+	{ 20,  "r20", REG_TYPE_UINT64, "org.gnu.gdb.loongarch.base", "CPU" },
+	{ 21,  "r21", REG_TYPE_UINT64, "org.gnu.gdb.loongarch.base", "CPU" },
+	{ 22,  "r22", REG_TYPE_UINT64, "org.gnu.gdb.loongarch.base", "CPU" },
+	{ 23,  "r23", REG_TYPE_UINT64, "org.gnu.gdb.loongarch.base", "CPU" },
+	{ 24,  "r24", REG_TYPE_UINT64, "org.gnu.gdb.loongarch.base", "CPU" },
+	{ 25,  "r25", REG_TYPE_UINT64, "org.gnu.gdb.loongarch.base", "CPU" },
+	{ 26,  "r26", REG_TYPE_UINT64, "org.gnu.gdb.loongarch.base", "CPU" },
+	{ 27,  "r27", REG_TYPE_UINT64, "org.gnu.gdb.loongarch.base", "CPU" },
+	{ 28,  "r28", REG_TYPE_UINT64, "org.gnu.gdb.loongarch.base", "CPU" },
+	{ 29,  "r29", REG_TYPE_UINT64, "org.gnu.gdb.loongarch.base", "CPU" },
+	{ 30,  "r30", REG_TYPE_UINT64, "org.gnu.gdb.loongarch.base", "CPU" },
+	{ 31,  "r31", REG_TYPE_UINT64, "org.gnu.gdb.loongarch.base", "CPU" },
+	{ 32,   "pc", REG_TYPE_UINT64, "org.gnu.gdb.loongarch.base", "CPU" },
+	{ 33, "badv", REG_TYPE_UINT64, "org.gnu.gdb.loongarch.base", "CSR" },
+};
+
+// Merely transfers core register value from PrAcc buffer into core cache
+static int loongarch64_get_core_reg(struct reg *reg)
+{
+	struct loongarch64_core_reg *loongarch64_reg = reg->arch_info;
+	struct target *target = loongarch64_reg->target;
+	struct loongarch64_common *loongarch64 = target->arch_info;
+	int id = loongarch64_reg->id;
+	uint64_t reg_value;
+
+	if  (target->state != TARGET_HALTED) {
+		return ERROR_TARGET_NOT_HALTED;
+	}
+
+	if ((id < 0) || (id >= LOONG64_NUM_REGS)) {
+		return ERROR_COMMAND_ARGUMENT_INVALID;
+	}
+
+	reg_value = loongarch64->core_regs[id];
+	buf_set_u64(loongarch64->core_cache->reg_list[id].value, 0, 64,
+		reg_value);
+	loongarch64->core_cache->reg_list[id].valid = true;
+	loongarch64->core_cache->reg_list[id].dirty = false;
+	
+	return ERROR_OK;
+}
+
+// Just sets core cache register value, not transferred into PrAcc buffer
+static int loongarch64_set_core_reg(struct reg *reg, uint8_t *buf)
+{
+	struct loongarch64_core_reg *loongarch64_reg = reg->arch_info;
+	struct target *target = loongarch64_reg->target;
+	uint64_t value = buf_get_u64(buf, 0, 64);
+
+	if (target->state != TARGET_HALTED) {
+		return ERROR_TARGET_NOT_HALTED;
+	}
+
+	buf_set_u64(reg->value, 0, 64, value);
+	reg->dirty = true;
+	reg->valid = true;
+
+	return ERROR_OK;
+}
+
+static const struct reg_arch_type loongarch64_reg_type = {
+	.get = loongarch64_get_core_reg,
+	.set = loongarch64_set_core_reg
+};
+
+static inline int reg_type2size(enum reg_type type)
+{
+	switch (type) {
+	case REG_TYPE_UINT32:
+	case REG_TYPE_INT:
+		return 32;
+	case REG_TYPE_UINT64:
+	case REG_TYPE_IEEE_DOUBLE:
+		return 64;
+	default:
+		return 64;
+	}
+}
+
+static int loongarch64_build_register_cache(struct target *target)
+{
+	struct loongarch64_common *loongarch64 = target->arch_info;
+	struct reg_cache **cache_p, *cache = NULL;
+	struct loongarch64_core_reg *arch_info = NULL;
+	struct reg *reg_list = NULL;
+	unsigned int i;
+
+	cache = calloc(1, sizeof(*cache));
+	if (!cache) {
+		LOG_ERROR("unable to allocate cache");
+		return ERROR_FAIL;
+	}
+
+	reg_list = calloc(LOONG64_NUM_REGS, sizeof(*reg_list));
+	if (!reg_list) {
+		LOG_ERROR("unable to allocate reg_list");
+		goto alloc_fail;
+	}
+
+	arch_info = calloc(LOONG64_NUM_REGS, sizeof(*arch_info));
+	if (!arch_info) {
+		LOG_ERROR("unable to allocate arch_info");
+		goto alloc_fail;
+	}
+
+	for (i = 0; i < LOONG64_NUM_REGS; i++) {
+		struct loongarch64_core_reg *a = &arch_info[i];
+		struct reg *r = &reg_list[i];
+
+		r->arch_info = &arch_info[i];
+		r->caller_save = true;	/* gdb defaults to true */
+		r->exist = true;
+		r->feature = &a->feature;
+		r->feature->name = loongarch64_regs[i].feature;
+		r->group = loongarch64_regs[i].group;
+		r->name = loongarch64_regs[i].name;
+		r->number = i;
+		r->reg_data_type = &a->reg_data_type;
+		r->reg_data_type->type = loongarch64_regs[i].type;
+		r->size = reg_type2size(loongarch64_regs[i].type);
+		r->type = &loongarch64_reg_type;
+		r->value = &a->value[0];
+
+		a->loongarch64_common = loongarch64;
+		a->id = loongarch64_regs[i].id;
+		a->target = target;
+	}
+
+	cache->name = "LoongArch64 Registers";
+	cache->reg_list = reg_list;
+	cache->num_regs = LOONG64_NUM_REGS;
+
+	cache_p = register_get_last_cache_p(&target->reg_cache);
+	(*cache_p) = cache;
+
+	loongarch64->core_cache = cache;
+
+	return ERROR_OK;
+
+alloc_fail:
+	free(cache);
+	free(reg_list);
+	free(arch_info);
+
+	return ERROR_FAIL;
+}
+
+int loongarch64_invalidate_core_regs(struct target *target)
+{
+	struct loongarch64_common *loongarch64 = target->arch_info;
+	unsigned int i;
+
+	for (i = 0; i < loongarch64->core_cache->num_regs; i++) {
+		loongarch64->core_cache->reg_list[i].valid = false;
+		loongarch64->core_cache->reg_list[i].dirty = false;
+	}
+
+	return ERROR_OK;
+}
+
+/*******************************************************************************
+ *       General target operations
+ ******************************************************************************/
+
+static int loongarch64_debug_entry(struct target *target)
+{
+	struct loongarch64_common *loongarch64 = target->arch_info;
+	struct loongarch_ejtag *ejtag_info = &loongarch64->ejtag_info;
+	struct reg *pc = &loongarch64->core_cache->reg_list[LOONG64_PC];
+	int retval;
+
+	// Read registers and save context
+	retval = loongarch64_pracc_read_regs(ejtag_info, loongarch64->core_regs);
+	if (retval != ERROR_OK) {
+		LOG_ERROR("Failed to read registers (%d)", retval);
+		return retval;
+	}
+	for (unsigned int i = 0; i < LOONG64_NUM_REGS; i++) {
+		retval = loongarch64_get_core_reg(
+			&loongarch64->core_cache->reg_list[i]);
+	}
+
+	LOG_DEBUG("entered debug state at PC 0x%" PRIx64 ", target->state: %s",
+		  buf_get_u64(pc->value, 0, 64), target_state_name(target));
+
+	// TODO: do we need to disable stepping and find halt reason like mips_mips64_debug_entry?
+	return ERROR_OK;
+}
+
 static int loongarch64_poll(struct target *target)
 {
 	struct loongarch64_common *loongarch64 = target->arch_info;
 	struct loongarch_ejtag *ejtag_info = &loongarch64->ejtag_info;
-
-	// Scan input has PrAcc bit set, to prevent accidentally completing a
-	// memory access
-	uint32_t ejtag_ctrl = LAEJTAG_CTRL_PRACC | LAEJTAG_CTRL_PROBEN
-			    | LAEJTAG_CTRL_PROBTRAP;
+	uint32_t ejtag_ctrl = ejtag_info->ejtag_ctrl;
+	int retval;
 
 	// Read Control register
 	loongarch_ejtag_set_instr(ejtag_info, LAEJTAG_INST_CONTROL);
@@ -35,19 +252,57 @@ static int loongarch64_poll(struct target *target)
 
 	// Check if CPU is in debug mode
 	if (ejtag_ctrl & LAEJTAG_CTRL_DM) {
-		target->state = TARGET_HALTED;
+		if (target->state == TARGET_RUNNING ||
+			target->state == TARGET_UNKNOWN) {
+
+			target->state = TARGET_HALTED;
+			retval = loongarch64_debug_entry(target);
+			if (retval != ERROR_OK) {
+				return retval;
+			}
+			target_call_event_callbacks(target, TARGET_EVENT_HALTED);
+		} else if (target->state == TARGET_DEBUG_RUNNING) {
+			target->state = TARGET_HALTED;
+			retval = loongarch64_debug_entry(target);
+			if (retval != ERROR_OK) {
+				return retval;
+			}
+			target_call_event_callbacks(target, TARGET_EVENT_DEBUG_HALTED);
+		}
 	} else if (ejtag_ctrl & LAEJTAG_CTRL_PRACC) {
 		/* This is a quirk found on LS2K0300: when exiting debug mode
 		 * the processor still tries to make one more read from dmseg
 		 * even though DM bit is already reset, and because of this
-		 * dmseg access, the processor is still in halt state. */
-
-		/* FIXME: Should we try to let it start running again and
-		 * report "RUNNING"? */
-		target->state = TARGET_HALTED;
+		 * dmseg access, the processor is still in halt state.
+		 * We attempt letting it go and declare it's running if
+		 * succeeded */
+		retval = loongarch_ejtag_exit_debug(ejtag_info);
+		if (retval == ERROR_OK) {
+			target->state = TARGET_RUNNING;
+		} else {
+			LOG_ERROR("Quirk: target not in DM but stuck at dmseg");
+			target->state = TARGET_UNKNOWN;
+		}
 	} else {
 		target->state = TARGET_RUNNING;
 	}
+
+	return ERROR_OK;
+}
+
+
+int loongarch64_arch_state(struct target *target)
+{
+	struct loongarch64_common *loongarch64 = target->arch_info;
+	struct reg *pc = &loongarch64->core_cache->reg_list[LOONG64_PC];
+
+	if (loongarch64->common_magic != LOONG64_COMMON_MAGIC) {
+		LOG_ERROR("BUG: called for a non-LoongArch64 target");
+		exit(-1);
+	}
+
+	LOG_USER("target halted due to %s, pc: 0x%" PRIx64 "",
+		 debug_reason_name(target), buf_get_u64(pc->value, 0, 64));
 
 	return ERROR_OK;
 }
@@ -135,6 +390,13 @@ static int loongarch64_target_create(struct target *target)
 static int loongarch64_init_target(struct command_context *cmd_ctx,
 	struct target *target)
 {
+	int retval;
+
+	retval = loongarch64_build_register_cache(target);
+	if (retval != ERROR_OK) {
+		return retval;
+	}
+
 	return ERROR_OK;
 }
 
@@ -156,7 +418,7 @@ struct target_type loongarch64_target = {
 	.name = "loongarch64",
 	
 	.poll = loongarch64_poll,
-	.arch_state = NULL,
+	.arch_state = loongarch64_arch_state,
 
 	.target_request_data = NULL,
 

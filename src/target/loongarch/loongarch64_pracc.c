@@ -60,7 +60,8 @@ static int wait_for_pracc_rw(struct loongarch_ejtag *ejtag_info, uint32_t *ctrl)
 
 	while (1) {
 		loongarch_ejtag_set_instr(ejtag_info, LAEJTAG_INST_CONTROL);
-		ejtag_ctrl = LAEJTAG_CTRL_PRACC;
+		ejtag_ctrl = LAEJTAG_CTRL_PRACC | LAEJTAG_CTRL_PROBEN |
+			     LAEJTAG_CTRL_PROBTRAP;
 		retval = loongarch_ejtag_drscan_32(ejtag_info, &ejtag_ctrl);
 		if (retval != ERROR_OK) {
 			return retval;
@@ -118,11 +119,11 @@ static int loongarch64_pracc_exec_read(struct loongarch64_pracc_context *ctx, ui
 	} else if ((address >= LOONG64_PRACC_TEXT) &&
 		   (address < LOONG64_PRACC_TEXT + ctx->code_len * LOONG64_PRACC_INSN_STEP)) {
 		
-		offset = ((address & ~3ull) - LOONG64_PRACC_TEXT) / LOONG64_PRACC_INSN_STEP;
-		data = (uint64_t)ctx->code[offset] << 32;
+		offset = ((address & ~7ull) - LOONG64_PRACC_TEXT) / LOONG64_PRACC_INSN_STEP;
+		data = (uint64_t)ctx->code[offset];
 		if (offset + 1 < ctx->code_len)
-			data |= (uint64_t)ctx->code[offset + 1];
-		LOG_DEBUG("Executing instructions %08" PRIx32 " at %08" PRIx64, ctx->code[offset], address);
+			data |= (uint64_t)ctx->code[offset + 1] << 32;
+		LOG_DEBUG("Executing instructions %08" PRIx64 " at %08" PRIx64, data, address);
 	} else if ((address & ~7ull) == LOONG64_PRACC_STACK) {
 
 		/* Read from debug stack */
@@ -154,7 +155,7 @@ static int loongarch64_pracc_exec_read(struct loongarch64_pracc_context *ctx, ui
 		return retval;
 	}
 
-	jtag_add_clocks(5);
+	// jtag_add_clocks(5);
 
 	return jtag_execute_queue();
 }
@@ -181,13 +182,11 @@ static int loongarch64_pracc_exec_write(struct loongarch64_pracc_context *ctx, u
 		return retval;
 	}
 
-	jtag_add_clocks(5);
+	// jtag_add_clocks(5);
 	retval = jtag_execute_queue();
 	if (retval != ERROR_OK) {
 		return retval;
 	}
-
-	
 
 	if ((address >= LOONG64_PRACC_PARAM_IN) &&
 	    (address < LOONG64_PRACC_PARAM_IN + ctx->num_iparam * LOONG64_PRACC_DATA_STEP)) {
@@ -244,6 +243,7 @@ int loongarch64_pracc_exec(struct loongarch_ejtag *ejtag_info,
 	uint64_t address = 0;
 	struct loongarch64_pracc_context ctx;
 	int retval;
+	int pass = 0;
 	unsigned int i;
 
 	for (i = 0; i < code_len; i++) {
@@ -319,9 +319,14 @@ int loongarch64_pracc_exec(struct loongarch_ejtag *ejtag_info,
 				LOG_ERROR("loongarch64_pracc_exec_write() failed (%d)", retval);
 				return retval;
 			}
-			return ERROR_NOT_IMPLEMENTED;
 		} else {
-			/* Read path */
+			/* Read path
+			 * Just like what's written in MIPS, the second time when CPU reads at dmseg
+			 * means that the program has ended execution */
+			if ((address == LOONG64_PRACC_TEXT) && (pass++)) {
+				LOG_DEBUG("Miniprogram finished execution");
+				break;
+			}
 			retval = loongarch64_pracc_exec_read(&ctx, address);
 			if (retval != ERROR_OK) {
 				LOG_ERROR("loongarch64_pracc_exec_read() failed (%d)", retval);
@@ -536,7 +541,8 @@ int loongarch64_pracc_read_mem(struct loongarch_ejtag *ejtag_info, uint64_t addr
 
 /* TODO: Memory writes */
 
-int loongarch64_pracc_read_regs(struct loongarch_ejtag *ejtag_info, uint64_t *regs)
+int loongarch64_pracc_read_regs(struct loongarch_ejtag *ejtag_info,
+				uint64_t *regs)
 {
 	const uint32_t code[] = {
 		/* Write $r2 to CSR.DSAVE */
@@ -578,16 +584,19 @@ int loongarch64_pracc_read_regs(struct loongarch_ejtag *ejtag_info, uint64_t *re
 		LOONG64_ST_D(29, 1, 0xe8),
 		LOONG64_ST_D(30, 1, 0xf0),
 		LOONG64_ST_D(31, 1, 0xf8),
-		/* Save $pc */
-		LOONG64_PCADDI(2, 0),
+		/* Save $pc (CSR.DERA, 0x501) */
+		LOONG64_CSRRD(2, 0x501),
 		LOONG64_ST_D(2, 1, 0x100),
+		/* Save CSR.BADV (0x7) */
+		LOONG64_CSRRD(2, 0x7),
+		LOONG64_ST_D(2, 1, 0x108),
 		/* Restore $r2 from CSR.DSAVE and save it */
 		LOONG64_CSRRD(2, 0x502),
 		LOONG64_ST_D(2, 1, 0x10),
 		/* Restore $r1 from param_out[1] */
 		LOONG64_LD_D(1, 1, 0x08),
 		/* b start */
-		LOONG64_B(NEG26(42)),
+		LOONG64_B(NEG26(43)),
 	};
 
 	LOG_DEBUG("enter loong64_pracc_exec");

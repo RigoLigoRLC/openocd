@@ -35,7 +35,6 @@ void loongarch_ejtag_set_instr(struct loongarch_ejtag *ejtag_info, uint32_t new_
 		field.in_value = NULL;
 
 		jtag_add_ir_scan(tap, &field, TAP_IDLE);
-		jtag_add_runtest(50, TAP_IDLE);
 	}
 }
 

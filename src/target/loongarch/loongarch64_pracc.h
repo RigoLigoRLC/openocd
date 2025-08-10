@@ -31,4 +31,7 @@ int loongarch64_pracc_exec(struct loongarch_ejtag *ejtag_info,
 			   unsigned int num_param_in, uint64_t *param_in,
 			   unsigned int num_param_out, uint64_t *param_out);
 
+int loongarch64_pracc_read_regs(struct loongarch_ejtag *ejtag_info,
+				uint64_t *regs);
+
 #endif /* OPENOCD_TARGET_LOONGARCH64_PRACC */

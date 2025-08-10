@@ -15,8 +15,9 @@
 #define LOONG64_COMMON_MAGIC	0x62646264U
 
 /* Offsets into LoongArch64 register dump */
-#define LOONG64_NUM_CORE_REGS	33
+#define LOONG64_NUM_CORE_REGS	34
 #define LOONG64_NUM_REGS	(LOONG64_NUM_CORE_REGS)
+#define LOONG64_PC		32
 
 struct loongarch64_common {
 	unsigned int common_magic;
@@ -27,6 +28,15 @@ struct loongarch64_common {
 	uint64_t core_regs[LOONG64_NUM_REGS];
 
 	struct working_area *fast_data_area;
+};
+
+struct loongarch64_core_reg {
+	uint32_t id;
+	struct target *target;
+	struct loongarch64_common *loongarch64_common;
+	uint8_t value[8];
+	struct reg_feature feature;
+	struct reg_data_type reg_data_type;
 };
 
 #define LOONG64_OP_OR		0x2a
@@ -86,9 +96,8 @@ struct loongarch64_common {
 #define LOONG64_MOVE(rd, rj)			LOONG64_OR(rd, 0, rj)
 #define LOONG64_LI_W(rd, word)			LOONG64_ORI(rd, 0, (word & 0xfffu)), \
 						LOONG64_LU12I_W(rd, ((word & 0xfffff000u) >> 12))
-#define LOONG64_LI_D(rd, dword)			LOONG64_ORI(rd, 0, (dword & 0xfffu)), \
-						LOONG64_LU12I_W(rd, ((dword & 0xfffff000u) >> 12)), \
-						LOONG64_LU32I_D(rd, ((dword & 0xfffff00000000u) >> 32)), \
+#define LOONG64_LI_D(rd, dword)			LOONG64_LU12I_W(rd, ((dword & 0xfffff000u) >> 12)), \
+						LOONG64_ORI(rd, rd, (dword & 0xfffu)), \
 						LOONG64_LU52I_D(rd, rd, ((dword & 0xfff0000000000000u) >> 52))
 
 #endif /* OPENOCD_TARGET_LOONGARCH64_H */
