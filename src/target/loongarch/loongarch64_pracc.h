@@ -21,6 +21,7 @@
 #define LOONG64_PRACC_STACK		0xDB00000000001800ull
 
 #define NEG12(v) ((uint32_t)(((~(v)) + 1) & 0xFFF))
+#define NEG16(v) ((uint32_t)(((~(v)) + 1) & 0xFFFF))
 #define NEG26(v) ((uint32_t)(((~(v)) + 1) & 0x3FFFFFF))
 
 #define LOONG64_PRACC_INSN_STEP 4
