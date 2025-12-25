@@ -473,7 +473,7 @@ static int loongarch64_pracc_read_mem64(struct loongarch_ejtag *ejtag_info, uint
 	int retval = ERROR_OK;
 
 	for (unsigned int i = 0; i < count; i++) {
-		retval = loongarch64_pracc_read_u64(ejtag_info, addr + i, &buf[i]);
+		retval = loongarch64_pracc_read_u64(ejtag_info, addr + 8 * i, &buf[i]);
 		if (retval != ERROR_OK) {
 			return retval;
 		}
@@ -487,7 +487,7 @@ static int loongarch64_pracc_read_mem32(struct loongarch_ejtag *ejtag_info, uint
 	int retval = ERROR_OK;
 
 	for (unsigned int i = 0; i < count; i++) {
-		retval = loongarch64_pracc_read_u32(ejtag_info, addr + i, &buf[i]);
+		retval = loongarch64_pracc_read_u32(ejtag_info, addr + 4 * i, &buf[i]);
 		if (retval != ERROR_OK) {
 			return retval;
 		}
@@ -501,7 +501,7 @@ static int loongarch64_pracc_read_mem16(struct loongarch_ejtag *ejtag_info, uint
 	int retval = ERROR_OK;
 
 	for (unsigned int i = 0; i < count; i++) {
-		retval = loongarch64_pracc_read_u16(ejtag_info, addr + i, &buf[i]);
+		retval = loongarch64_pracc_read_u16(ejtag_info, addr + 2 * i, &buf[i]);
 		if (retval != ERROR_OK) {
 			return retval;
 		}

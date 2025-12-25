@@ -317,7 +317,7 @@ static int loongarch64_halt(struct target *target)
 
 	switch (target->state) {
 	case TARGET_HALTED:
-		LOG_DEBUG("target was already halted");
+		LOG_WARNING("target was already halted");
 		return ERROR_OK;
 	case TARGET_UNKNOWN:
 		LOG_WARNING("target was in unknown state when halt was requested");
@@ -368,6 +368,66 @@ static int loongarch64_resume(struct target *target, bool current,
 	return ERROR_OK;
 }
 
+static int loongarch64_read_memory(struct target *target, uint64_t address,
+	uint32_t size, uint32_t count, uint8_t *buffer)
+{
+	struct loongarch64_common *loongarch64 = target->arch_info;
+	struct loongarch_ejtag *ejtag_info = &loongarch64->ejtag_info;
+	int retval;
+	void *t;
+
+	if (target->state != TARGET_HALTED) {
+		LOG_TARGET_ERROR(target, "not halted");
+		return ERROR_TARGET_NOT_HALTED;
+	}
+
+	/* sanitize arguments */
+	if (((size != 8) && (size != 4) && (size != 2) && (size != 1))
+	    || !count || !buffer)
+		return ERROR_COMMAND_ARGUMENT_INVALID;
+
+	if (((size == 8) && (address & 0x7)) || ((size == 4) && (address & 0x3))
+	    || ((size == 2) && (address & 0x1)))
+		return ERROR_TARGET_UNALIGNED_ACCESS;
+
+	if (size > 1) {
+		t = calloc(count, size);
+		if (!t) {
+			LOG_ERROR("Out of memory");
+			return ERROR_FAIL;
+		}
+	} else
+		t = buffer;
+
+	LOG_DEBUG("address: 0x%16.16" PRIx64 ", size: 0x%8.8" PRIx32 ", count: 0x%8.8" PRIx32 "",
+		  address, size, count);
+
+	retval = loongarch64_pracc_read_mem(ejtag_info, address, size, count, (void *)t);
+
+	if (retval != ERROR_OK) {
+		LOG_ERROR("loongarch64_pracc_read_mem filed");
+		goto read_done;
+	}
+
+	switch (size) {
+	case 8:
+		target_buffer_set_u64_array(target, buffer, count, t);
+		break;
+	case 4:
+		target_buffer_set_u32_array(target, buffer, count, t);
+		break;
+	case 2:
+		target_buffer_set_u16_array(target, buffer, count, t);
+		break;
+	}
+
+read_done:
+	if (size > 1)
+		free(t);
+
+	return retval;
+}
+
 static int loongarch64_target_create(struct target *target)
 {
 	struct loongarch64_common *loongarch64;
@@ -402,7 +462,6 @@ static int loongarch64_init_target(struct command_context *cmd_ctx,
 
 static int loongarch64_examine(struct target *target)
 {
-	// LoongArch EJTAG doesn't have a lot of interesting stuff
 	int retval;
 	struct loongarch64_common *loongarch64 = target->arch_info;
 
@@ -428,6 +487,20 @@ struct target_type loongarch64_target = {
 
 	.assert_reset = NULL,
 	.deassert_reset = NULL,
+
+	.get_gdb_reg_list = NULL,
+
+	.read_memory = loongarch64_read_memory,
+	.write_memory = NULL,
+	.checksum_memory = NULL,
+	.blank_check_memory = NULL,
+
+	.run_algorithm = NULL,
+
+	.add_breakpoint = NULL,
+	.remove_breakpoint = NULL,
+	.add_watchpoint = NULL,
+	.remove_watchpoint = NULL,
 
 	.target_create = loongarch64_target_create,
 	.init_target = loongarch64_init_target,
