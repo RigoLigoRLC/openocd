@@ -29,6 +29,9 @@
 int loongarch64_pracc_read_mem(struct loongarch_ejtag *ejtag_info, uint64_t addr,
 			       unsigned int size, unsigned int count, void *buf);
 
+int loongarch64_pracc_write_mem(struct loongarch_ejtag *ejtag_info, uint64_t addr,
+				unsigned int size, unsigned int count, void *buf);
+
 int loongarch64_pracc_exec(struct loongarch_ejtag *ejtag_info,
 			   unsigned int code_len, const uint32_t *code,
 			   unsigned int num_param_in, uint64_t *param_in,

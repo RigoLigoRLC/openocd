@@ -428,6 +428,65 @@ read_done:
 	return retval;
 }
 
+static int loongarch64_write_memory(struct target *target, uint64_t address,
+	uint32_t size, uint32_t count, const uint8_t *buffer)
+{
+	struct loongarch64_common *loongarch64 = target->arch_info;
+	struct loongarch_ejtag *ejtag_info = &loongarch64->ejtag_info;
+	int retval;
+	void *t = NULL;
+
+	if (target->state != TARGET_HALTED) {
+		LOG_TARGET_ERROR(target, "not halted");
+		return ERROR_TARGET_NOT_HALTED;
+	}
+
+	/* sanitize arguments */
+	if (((size != 8) && (size != 4) && (size != 2) && (size != 1))
+	    || !count || !buffer)
+		return ERROR_COMMAND_ARGUMENT_INVALID;
+
+	if (((size == 8) && (address & 0x7)) || ((size == 4) && (address & 0x3))
+	    || ((size == 2) && (address & 0x1)))
+		return ERROR_TARGET_UNALIGNED_ACCESS;
+
+	/* TODO: "Bulk" write */
+
+	if (size > 1) {
+		t = calloc(count, size);
+		if (!t) {
+			LOG_ERROR("Out of memory");
+			return ERROR_FAIL;
+		}
+
+		switch (size) {
+		case 8:
+			target_buffer_get_u64_array(target, buffer, count, (uint64_t *)t);
+			break;
+		case 4:
+			target_buffer_get_u32_array(target, buffer, count, (uint32_t *)t);
+			break;
+		case 2:
+			target_buffer_get_u16_array(target, buffer, count, (uint16_t *)t);
+			break;
+		}
+		buffer = t;
+	}
+
+	LOG_DEBUG("address: 0x%16.16" PRIx64 ", size: 0x%8.8" PRIx32 ", count: 0x%8.8" PRIx32 "",
+		  address, size, count);
+
+	retval = loongarch64_pracc_write_mem(ejtag_info, address, size, count, (void *)buffer);
+
+	if (retval != ERROR_OK) {
+		LOG_ERROR("loongarch64_pracc_read_mem filed");
+	}
+
+	free(t);
+
+	return retval;
+}
+
 static int loongarch64_target_create(struct target *target)
 {
 	struct loongarch64_common *loongarch64;
@@ -491,7 +550,7 @@ struct target_type loongarch64_target = {
 	.get_gdb_reg_list = NULL,
 
 	.read_memory = loongarch64_read_memory,
-	.write_memory = NULL,
+	.write_memory = loongarch64_write_memory,
 	.checksum_memory = NULL,
 	.blank_check_memory = NULL,
 

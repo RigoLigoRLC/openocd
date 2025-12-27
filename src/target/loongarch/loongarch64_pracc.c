@@ -541,6 +541,68 @@ int loongarch64_pracc_read_mem(struct loongarch_ejtag *ejtag_info, uint64_t addr
 
 /* TODO: Memory writes */
 
+static int loongarch64_pracc_write_u64(struct loongarch_ejtag *ejtag_info, uint64_t addr, uint64_t *buf) {
+	const uint32_t code[] = {
+		/* Write $r21 to CSR.DSAVE */
+		LOONG64_CSRWR(21, 0x502),
+		/* $r21 = LOONG64_PRACC_STACK (4 instructions inside) */
+		LOONG64_LI_D(21, LOONG64_PRACC_STACK),
+		/* Save $t0 to stack */
+		LOONG64_ST_D(12, 21, 0),
+		/* Save $t1 to stack */
+		LOONG64_ST_D(13, 21, 0),
+		/* $t0 = param_in[0] (write address) */
+		LOONG64_LD_D(12, 21, NEG12(LOONG64_PRACC_STACK - LOONG64_PRACC_PARAM_IN)),
+		/* $t1 = param_in[1] (data to be written) */
+		LOONG64_LD_D(13, 21, NEG12(LOONG64_PRACC_STACK - LOONG64_PRACC_PARAM_IN - 8)),
+		/* *$t0 = $t1 */
+		LOONG64_ST_D(13, 12, 0),
+		/* Restore $t1 from stack */
+		LOONG64_LD_D(13, 21, 0),
+		/* Restore $t0 from stack */
+		LOONG64_LD_D(12, 21, 0),
+		/* Restore $r21 from CSR.DSAVE */
+		LOONG64_CSRRD(21, 0x502),
+		/* b start */
+		LOONG64_B(NEG26(12)),
+	};
+
+	uint64_t param_in[2] = { addr, *buf };
+
+	return loongarch64_pracc_exec(ejtag_info, ARRAY_SIZE(code), code,
+		ARRAY_SIZE(param_in), param_in, 1, buf);
+}
+
+static int loongarch64_pracc_write_mem64(struct loongarch_ejtag *ejtag_info, uint64_t addr,
+					 unsigned int count, uint64_t *buf)
+{
+	int retval = ERROR_OK;
+
+	for (unsigned int i = 0; i < count; i++) {
+		retval = loongarch64_pracc_write_u64(ejtag_info, addr + 8 * i, &buf[i]);
+		if (retval != ERROR_OK)
+			return retval;
+	}
+	return retval;
+}
+
+int loongarch64_pracc_write_mem(struct loongarch_ejtag *ejtag_info, uint64_t addr,
+				unsigned int size, unsigned int count, void *buf)
+{
+	switch (size) {
+	case 1:
+		// return mips64_pracc_write_mem8(ejtag_info, addr, count, buf);
+	case 2:
+		// return mips64_pracc_write_mem16(ejtag_info, addr, count, buf);
+	case 4:
+		// return mips64_pracc_write_mem32(ejtag_info, addr, count, buf);
+		return ERROR_FAIL;
+	case 8:
+		return loongarch64_pracc_write_mem64(ejtag_info, addr, count, buf);
+	}
+	return ERROR_FAIL;
+}
+
 int loongarch64_pracc_read_regs(struct loongarch_ejtag *ejtag_info,
 				uint64_t *regs)
 {
