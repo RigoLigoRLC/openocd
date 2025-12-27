@@ -42,7 +42,6 @@ struct loongarch64_core_reg {
 #define LOONG64_OP_OR		0x2a
 #define LOONG64_OP_ORI		0xe
 #define LOONG64_OP_ADD_D	0x21
-#define LOONG64_OP_ADDI_D	0xb
 #define LOONG64_OP_LU12I_W	0xa
 #define LOONG64_OP_LU32I_D	0xb
 #define LOONG64_OP_LU52I_D	0xc
@@ -59,14 +58,12 @@ struct loongarch64_core_reg {
 #define LOONG64_OP_IBAR		0x70e5
 #define LOONG64_OP_CSROP	0x4
 #define LOONG64_OP_B		0x14
-#define LOONG64_OP_BNE		0x17
 #define LOONG64_OP_ERTN		0x1920e
 
 #define LOONG64_INSN_2R(opcode, rd, rj)		(((opcode) << 10) | ((rj) << 5) | (rd))
 #define LOONG64_INSN_3R(opcode, rd, rj, rk)	(((opcode) << 15) | ((rk) << 10) | ((rj) << 5) | (rd))
 #define LOONG64_INSN_2RI12(opcode, rd, rj, imm)	(((opcode) << 22) | ((imm) << 10) | ((rj) << 5) | (rd))
 #define LOONG64_INSN_2RI14(opcode, rd, rj, imm)	(((opcode) << 24) | ((imm) << 10) | ((rj) << 5) | (rd))
-#define LOONG64_INSN_2RI16(opcode, rd, rj, imm)	(((opcode) << 26) | ((imm) << 10) | ((rj) << 5) | (rd))
 #define LOONG64_INSN_1RI20(opcode, rd, imm)	(((opcode) << 25) | ((imm) << 5) | (rd))
 #define LOONG64_INSN_I15(opcode, imm)		(((opcode) << 15) | (imm))
 #define LOONG64_INSN_I26(opcode, imm)		(((opcode) << 26) | (((imm) & 0xFFFF) << 10) | (((imm) >> 16) & 0x3FF))
@@ -74,7 +71,6 @@ struct loongarch64_core_reg {
 #define LOONG64_OR(rd, rj, rk)			LOONG64_INSN_3R(LOONG64_OP_OR, rd, rj, rk)
 #define LOONG64_ORI(rd, rj, imm)		LOONG64_INSN_2RI12(LOONG64_OP_ORI, rd, rj, imm)
 #define LOONG64_ADD_D(rd, rj, rk)		LOONG64_INSN_3R(LOONG64_OP_ADD_D, rd, rj, rk)
-#define LOONG64_ADDI_D(rd, rj, imm)		LOONG64_INSN_2RI12(LOONG64_OP_ADDI_D, rd, rj, imm)
 #define LOONG64_LU12I_W(rd, imm)		LOONG64_INSN_1RI20(LOONG64_OP_LU12I_W, rd, imm)
 #define LOONG64_LU32I_D(rd, imm)		LOONG64_INSN_1RI20(LOONG64_OP_LU32I_D, rd, imm)
 #define LOONG64_LU52I_D(rd, rj, imm)		LOONG64_INSN_2RI12(LOONG64_OP_LU52I_D, rd, rj, imm)
@@ -93,7 +89,6 @@ struct loongarch64_core_reg {
 #define LOONG64_CSRWR(rd, csr)			LOONG64_INSN_2RI14(LOONG64_OP_CSROP, rd, 1, csr)
 #define LOONG64_CSRXCHG(rd, csr)		LOONG64_INSN_2RI14(LOONG64_OP_CSROP, rd, 2, csr)
 #define LOONG64_B(imm)				LOONG64_INSN_I26(LOONG64_OP_B, imm)
-#define LOONG64_BNE(rd, rj, imm)		LOONG64_INSN_2RI16(LOONG64_OP_BNE, rd, rj, imm)
 #define LOONG64_ERTN				LOONG64_INSN_2R(LOONG64_OP_ERTN, 0, 0)
 
 /* Pseudo instructions for convenience */

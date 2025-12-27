@@ -343,65 +343,32 @@ int loongarch64_pracc_exec(struct loongarch_ejtag *ejtag_info,
 	return ERROR_OK;
 }
 
-/* Read 64-bit double-words from memory. Must not read more than size of param_out area */
-static int loongarch64_pracc_read_u64(struct loongarch_ejtag *ejtag_info, uint64_t addr,
-				      uint64_t count, uint64_t *buf) {
+static int loongarch64_pracc_read_u64(struct loongarch_ejtag *ejtag_info, uint64_t addr, uint64_t *buf) {
 	const uint32_t code[] = {
 		/* Write $r21 to CSR.DSAVE */
 		LOONG64_CSRWR(21, 0x502),
 		/* $r21 = LOONG64_PRACC_STACK (4 instructions inside) */
 		LOONG64_LI_D(21, LOONG64_PRACC_STACK),
-		/* Save $t0 (read address) to stack */
+		/* Save $t0 to stack */
 		LOONG64_ST_D(12, 21, 0),
-		/* Save $t1 (count) to stack */
-		LOONG64_ST_D(13, 21, 0),
-		/* Save $t2 (write address) to stack */
-		LOONG64_ST_D(14, 21, 0),
-		/* Save $t3 (write data) to stack */
-		LOONG64_ST_D(15, 21, 0),
 		/* $t0 = param_in[0] (read address) */
 		LOONG64_LD_D(12, 21, NEG12(LOONG64_PRACC_STACK - LOONG64_PRACC_PARAM_IN)),
-		/* $t1 = param_in[1] (count) */
-		LOONG64_LD_D(13, 21, NEG12(LOONG64_PRACC_STACK - LOONG64_PRACC_PARAM_IN - 8)),
-		/* $t2 = &param_out[0] (write address) */
-		LOONG64_ADDI_D(14, 21, NEG12(LOONG64_PRACC_STACK - LOONG64_PRACC_PARAM_OUT)),
-		/* ld.d $t3, $t0, 0 (reads 64 bit from that address into $t3) */
-		LOONG64_LD_D(15, 12, 0),
-		/* *write_address (param_out[offset]) := $t3 */
-		LOONG64_ST_D(15, 14, 0),
-		/* addi.d $t0, $t0, 8 (increment read_address by 8) */
-		LOONG64_ADDI_D(12, 12, 8),
-		/* addi.d $t1, $t1, -1 (decrement count) */
-		LOONG64_ADDI_D(13, 13, NEG12(1)),
-		/* addi.d $t2, $t2, 8 (increment write_address by 8) */
-		LOONG64_ADDI_D(14, 14, 8),
-		/* bne zero, $t1, -20 (when not all memory is read, continue read loop) */
-		LOONG64_BNE(0, 13, NEG16(5)),
-		/* Restore $t3 from stack */
-		LOONG64_LD_D(15, 21, 0),
-		/* Restore $t2 from stack */
-		LOONG64_LD_D(14, 21, 0),
-		/* Restore $t1 from stack */
-		LOONG64_LD_D(13, 21, 0),
+		/* ld.d $t0, $t0, 0 (reads 64 bit from that address into $t0) */
+		LOONG64_LD_D(12, 12, 0),
+		/* param_out[0] = $t0 */
+		LOONG64_ST_D(12, 21, NEG12(LOONG64_PRACC_STACK - LOONG64_PRACC_PARAM_OUT)),
 		/* Restore $t0 from stack */
 		LOONG64_LD_D(12, 21, 0),
 		/* Restore $r21 from CSR.DSAVE */
 		LOONG64_CSRRD(21, 0x502),
 		/* b start */
-		LOONG64_B(NEG26(22)),
+		LOONG64_B(NEG26(11)),
 	};
 
-	if (count > (LOONG64_PRACC_PARAM_OUT_SIZE / 8)) {
-		LOG_ERROR("loongarch64_pracc_read_u64: requested more data than param_out area (%"
-			  PRIu64 " bytes requested, maximum %" PRIu32 " bytes)", count * 8,
-			  LOONG64_PRACC_PARAM_OUT_SIZE);
-		return ERROR_BUF_TOO_SMALL;
-	}
-
-	uint64_t param_in[2] = { addr, count };
+	uint64_t param_in[1] = { addr };
 
 	return loongarch64_pracc_exec(ejtag_info, ARRAY_SIZE(code), code,
-		ARRAY_SIZE(param_in), param_in, count, buf);
+		ARRAY_SIZE(param_in), param_in, 1, buf);
 }
 
 static int loongarch64_pracc_read_u32(struct loongarch_ejtag *ejtag_info, uint64_t addr, uint32_t *buf) {
@@ -505,13 +472,11 @@ static int loongarch64_pracc_read_mem64(struct loongarch_ejtag *ejtag_info, uint
 {
 	int retval = ERROR_OK;
 
-	for (unsigned int i = 0; i < count; ) {
-		const int burst = MIN(count - i, LOONG64_PRACC_PARAM_OUT_SIZE / 8);
-		retval = loongarch64_pracc_read_u64(ejtag_info, addr + 8 * i, burst, &buf[i]);
+	for (unsigned int i = 0; i < count; i++) {
+		retval = loongarch64_pracc_read_u64(ejtag_info, addr + 8 * i, &buf[i]);
 		if (retval != ERROR_OK) {
 			return retval;
 		}
-		i += burst;
 	}
 	return retval;
 }
