@@ -16,7 +16,7 @@
 
 #include <jtag/jtag.h>
 #include <jtag/swim.h>
-#include <jtag/lsejtag/lsejtag_transport.h>
+#include <jtag/lsejtag_interface.h>
 #include <target/arm_tpiu_swo.h>
 #include <transport/transport.h>
 
@@ -364,7 +364,7 @@ struct adapter_driver {
 	const struct swim_driver *swim_ops;
 
 	/* Loongson EJTAG APIs */
-	const struct lsejtag_driver *lsejtag_ops;
+	const struct lsejtag_interface *lsejtag_ops;
 };
 
 int adapter_resets(int assert_trst, int assert_srst);

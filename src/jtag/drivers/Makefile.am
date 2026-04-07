@@ -219,6 +219,9 @@ endif
 if XVC
 DRIVERFILES += %D%/xvc.c
 endif
+if LSEJTAG
+DRIVERFILES += %D%/loongson_ejtag.c
+endif
 
 DRIVERHEADERS = \
 	%D%/bitbang.h \

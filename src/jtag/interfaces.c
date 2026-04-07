@@ -17,6 +17,7 @@
  *   Copyright (C) 2020, Ampere Computing LLC                              *
  ***************************************************************************/
 
+#include "jtag/interface.h"
 #ifdef HAVE_CONFIG_H
 #include "config.h"
 #endif
@@ -168,6 +169,9 @@ struct adapter_driver *adapter_drivers[] = {
 
 #if BUILD_XVC == 1
 		&xvc_adapter_driver,
+#endif
+#if BUILD_LSEJTAG == 1
+		&loongson_ejtag_adapter_driver,
 #endif
 		NULL,
 };

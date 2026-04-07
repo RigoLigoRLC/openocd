@@ -145,7 +145,8 @@ m4_define([USB1_ADAPTERS],
 	[[rlink], [Raisonance RLink JTAG Programmer], [RLINK]],
 	[[usbprog], [USBProg JTAG Programmer], [USBPROG]],
 	[[esp_usb_jtag], [Espressif JTAG Programmer], [ESP_USB_JTAG]],
-	[[cmsis_dap_v2], [CMSIS-DAP v2 compliant dongle (USB bulk)], [CMSIS_DAP_USB]]])
+	[[cmsis_dap_v2], [CMSIS-DAP v2 compliant dongle (USB bulk)], [CMSIS_DAP_USB]],
+	[[lsejtag], [Loongson EJTAG Programmer], [LSEJTAG]]])
 
 # Please keep cmsis_dap_v2 the last in USB1_ADAPTERS
 # and cmsis_dap the first in HIDAPI_ADAPTERS
@@ -673,6 +674,14 @@ AM_CONDITIONAL([HLADAPTER_ICDI], [test "x$enable_ti_icdi" != "xno"])
 AM_CONDITIONAL([HLADAPTER_NULINK], [test "x$enable_nulink" != "xno"])
 AM_CONDITIONAL([CMSIS_DAP_CORE],
    [test "x$enable_cmsis_dap" != "xno" -o "x$enable_cmsis_dap_v2" != "xno" -o "x$enable_cmsis_dap_tcp" != "xno"])
+
+AS_IF([test "x$enable_lsejtag" != "xno"], [
+	AC_DEFINE([BUILD_LSEJTAG], [1], [1 if you want the Loongson EJTAG driver.])
+	AM_CONDITIONAL([LSEJTAG], [true])
+], [
+	AC_DEFINE([BUILD_LSEJTAG], [0], [0 if you don't want the Loongson EJTAG driver.])
+	AM_CONDITIONAL([LSEJTAG], [false])
+])
 
 AS_IF([test "x$enable_jlink" != "xno"], [
   AS_IF([test "x$use_internal_libjaylink" = "xyes"], [
