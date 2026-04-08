@@ -113,6 +113,12 @@ static size_t mps_tx; ///< Maximum packet size for OUT endpoint
 #define OP_FASTREAD_FASTDATA		0x0F
 #define OP_READ_VER			0x1F
 
+#define IO_LED				0x00
+#define IO_OE				0x02
+#define IO_TRST				0x03
+#define IO_BRST				0x04
+#define IO_DINT				0x05
+
 /**
  * @brief
  * Loongson EJTAG command is mostly composed of these parts:
@@ -226,7 +232,8 @@ static int lsejtag_impl_queue_tx(void *bytes, size_t length)
  * @brief Only called by lsejtag_cmd_* functions after they fill up the transfer
  * 	  buffer.
  * 	  Sends data awaiting transmission in the USB buffer and receives
- * 	  expected bytes of data from probe.
+ * 	  expected bytes of data from probe. \@bytes_rx is cleared after a
+ * 	  successful reception.
  */
 static int lsejtag_impl_send_recv(void)
 {
@@ -261,6 +268,7 @@ static int lsejtag_impl_send_recv(void)
 		LOG_ERROR(LOG_PREFIX "USB bulk read failed");
 		return ERROR_JTAG_DEVICE_ERROR;
 	}
+	bytes_rx = 0;
 
 	return ERROR_OK;
 }
@@ -283,13 +291,33 @@ int lsejtag_cmd_read_ver(uint32_t *out)
 	lsejtag_impl_queue_tx(&cmd, sizeof(cmd));
 	bytes_rx = 4;
 	rc = lsejtag_impl_send_recv();
-
 	if (rc != ERROR_OK) {
 		return rc;
 	}
 
 	memcpy(out, usb_buf, sizeof(*out));
 	return ERROR_OK;
+}
+
+/**
+ * @brief Manipulate certain IO port voltage level on probe.
+ * @param pin_id ID of IO port. Use IO_XXX macros.
+ * @param level Voltage level. true for high, false for low.
+ */
+int lsejtag_cmd_io_manip(int pin_id, bool level)
+{
+	assert(bytes_rx == 0 && bytes_tx == 0);
+
+	union lsejtag_cmd_word cmd = {
+		.io_manip = {
+			.level = level,
+			.pin_id = pin_id,
+			.op = OP_READ_VER,
+		}
+	};
+
+	lsejtag_impl_queue_tx(&cmd, sizeof(cmd));
+	return lsejtag_impl_send_recv();
 }
 
 /**
@@ -439,7 +467,8 @@ int lsejtag_iface_execute_queue(struct jtag_command *cmd_queue)
 			LOG_ERROR(LOG_PREFIX "JTAG_RUNTEST unsupported: No bit-banged JTAG support");
 			break;
                 case JTAG_RESET:
-			// TODO
+			lsejtag_cmd_io_manip(IO_TRST, cmd->cmd.reset->trst);
+			lsejtag_cmd_io_manip(IO_BRST, cmd->cmd.reset->srst);
 			break;
                 case JTAG_PATHMOVE:
 			LOG_ERROR(LOG_PREFIX "JTAG_PATHMOVE unsupported: No bit-banged JTAG support");
@@ -454,6 +483,8 @@ int lsejtag_iface_execute_queue(struct jtag_command *cmd_queue)
 			LOG_ERROR(LOG_PREFIX "JTAG_TMS unsupported: No bit-banged JTAG support");
 			break;
                 }
+
+		cmd = cmd->next;
         }
 
 	return retval;
