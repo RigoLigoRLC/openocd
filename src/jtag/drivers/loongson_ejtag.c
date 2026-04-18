@@ -44,6 +44,8 @@
 #ifndef MIN
 #define MIN(a, b) ((a)<(b)?(a):(b))
 #endif
+// Calculate how many words (32-bit word) can fit x bits
+#define BIT2WORD(x) (((x)+31)/32)
 
 /**
  * @brief
@@ -96,6 +98,7 @@ static size_t usb_buf_size;
 static size_t bytes_tx; ///< Bytes of data awaiting for transmission
 static size_t bytes_rx; ///< Bytes of data awaiting for reception
 static size_t mps_tx; ///< Maximum packet size for OUT endpoint
+static size_t mps_rx; ///< Maximum packet size for IN endpoint
 
 /**
  * @defgroup Loongson EJTAG internal communication
@@ -153,13 +156,7 @@ union lsejtag_cmd_word {
 			uint16_t return_queued_data : 1;
 			uint16_t queue_tdo : 1;
 			uint16_t op : 6;
-		} ir_scan; // Do an IR scan (Opcode = 0x04)
-		struct {
-			uint16_t reserved : 8;
-			uint16_t return_queued_data : 1;
-			uint16_t queue_tdo : 1;
-			uint16_t op : 6;
-		} dr_scan; // Do an DR scan (Opcode = 0x05)
+		} scan; // Do an IR/DR scan (Opcode = 0x04, DR scan = 0x05)
 		struct {
 			uint16_t reserved : 10;
 			uint16_t op : 6;
@@ -234,23 +231,28 @@ static int lsejtag_impl_queue_tx(void *bytes, size_t length)
  * 	  Sends data awaiting transmission in the USB buffer and receives
  * 	  expected bytes of data from probe. \@bytes_rx is cleared after a
  * 	  successful reception.
+ * @param do_recv Whether reception is done. May be useful for scan commands
+ * 	  when they wanted to queue many scans and read accumulated TDO at once.
  */
-static int lsejtag_impl_send_recv(void)
+static int lsejtag_impl_send_recv(bool do_recv)
 {
 	assert(bytes_tx != 0);
 
 	bool send_zlp = (bytes_tx % mps_tx) == 0;
 	int transferred;
+	int offset = 0;
 
 	// Transmission
 	while (bytes_tx) {
-		if (jtag_libusb_bulk_write(priv.hdev, LSEJTAG_OUT_EP, (char *)usb_buf,
-			MIN(mps_tx, bytes_tx), 1000, &transferred) != ERROR_OK) {
+		if (jtag_libusb_bulk_write(priv.hdev, LSEJTAG_OUT_EP, 
+			((char *)usb_buf) + offset, MIN(mps_tx, bytes_tx), 1000,
+			&transferred) != ERROR_OK) {
 			LOG_ERROR(LOG_PREFIX "USB bulk write failed");
 			return ERROR_JTAG_DEVICE_ERROR;
 		}
 
 		bytes_tx -= transferred;
+		offset += transferred;
 	}
 
 	if (send_zlp) {
@@ -262,13 +264,22 @@ static int lsejtag_impl_send_recv(void)
 	}
 
 	// Reception
-	lsejtag_impl_ensure_buf_size(bytes_rx);
-	if (jtag_libusb_bulk_read(priv.hdev, LSEJTAG_IN_EP, (char *)usb_buf,
-		bytes_rx, 1000, &transferred) != ERROR_OK) {
-		LOG_ERROR(LOG_PREFIX "USB bulk read failed");
-		return ERROR_JTAG_DEVICE_ERROR;
+	if (do_recv && bytes_rx)
+	{
+		offset = 0;
+		lsejtag_impl_ensure_buf_size(bytes_rx);
+		while (bytes_rx) {
+			if (jtag_libusb_bulk_read(priv.hdev, LSEJTAG_IN_EP, 
+				((char *)usb_buf) + offset, MIN(mps_rx, bytes_rx), 1000,
+				&transferred) != ERROR_OK) {
+				LOG_ERROR(LOG_PREFIX "USB bulk read failed");
+				return ERROR_JTAG_DEVICE_ERROR;
+			}
+
+			bytes_rx -= transferred;
+			offset += transferred;
+		}
 	}
-	bytes_rx = 0;
 
 	return ERROR_OK;
 }
@@ -290,7 +301,7 @@ int lsejtag_cmd_read_ver(uint32_t *out)
 
 	lsejtag_impl_queue_tx(&cmd, sizeof(cmd));
 	bytes_rx = 4;
-	rc = lsejtag_impl_send_recv();
+	rc = lsejtag_impl_send_recv(true);
 	if (rc != ERROR_OK) {
 		return rc;
 	}
@@ -312,12 +323,49 @@ int lsejtag_cmd_io_manip(int pin_id, bool level)
 		.io_manip = {
 			.level = level,
 			.pin_id = pin_id,
-			.op = OP_READ_VER,
+			.op = OP_IO_MANIP,
 		}
 	};
 
 	lsejtag_impl_queue_tx(&cmd, sizeof(cmd));
-	return lsejtag_impl_send_recv();
+	return lsejtag_impl_send_recv(false);
+}
+
+int lsejtag_cmd_ir_dr_scan(bool is_ir, bool buffer_tdo, bool return_buffer,
+	uint16_t nbits, uint32_t *scan_in_data, uint32_t *scan_out_data)
+{
+	assert(!return_buffer || (return_buffer && scan_out_data != NULL));
+
+	union lsejtag_cmd_word cmd = {
+		.scan = {
+			.return_queued_data = return_buffer,
+			.queue_tdo = buffer_tdo,
+			.op = (is_ir ? OP_IR_SCAN : OP_DR_SCAN)
+		}
+	};
+
+	// How many bytes of TDO data can be queued on probe after this scan
+	// The length is same as bytes of TDI data to be sent to device
+	const int bytes_queued = BIT2WORD(nbits) * 4;
+	if (buffer_tdo) {
+		bytes_rx += bytes_queued;
+	}
+
+	lsejtag_impl_queue_tx(&cmd, sizeof(cmd));
+	lsejtag_impl_queue_tx(&nbits, sizeof(nbits));
+	lsejtag_impl_queue_tx(scan_in_data, bytes_queued);
+
+	const size_t out_bytes = return_buffer ? bytes_rx : 0;
+	int err = lsejtag_impl_send_recv(return_buffer);
+	if (err != ERROR_OK) {
+		return err;
+	}
+
+	if (return_buffer) {
+		memcpy(scan_out_data, usb_buf, out_bytes);
+	}
+
+	return ERROR_OK;
 }
 
 /**
@@ -406,6 +454,7 @@ static int lsejtag_init(void)
 
 	// FIXME: fetch correct OUT EP MPS
 	mps_tx = 64;
+	mps_rx = 64;
 
 	// FIXME: delete after test
 	uint32_t ver;
@@ -452,13 +501,34 @@ int lsejtag_iface_execute_queue(struct jtag_command *cmd_queue)
 {
 	struct jtag_command *cmd = cmd_queue; /* currently processed command */
 	int retval = ERROR_OK;
+	int scan_length = 0;
+	uint32_t *buffer = NULL;
 
 	// Loongson EJTAG adapter do not support bit-banged JTAG. You can only
 	// use it to generate IR/DR scans.
 	while (cmd) {
 		switch (cmd->type) {
                 case JTAG_SCAN:
-			// TODO
+			LOG_DEBUG_IO(LOG_PREFIX "JTAG_SCAN");
+			scan_length = jtag_build_buffer(cmd->cmd.scan, (uint8_t **)&buffer);
+			if (scan_length % 32) {
+				// Pad buffer to 32-bit boundary
+				uint32_t *buf_new = realloc(buffer, BIT2WORD(scan_length) * 4);
+				if (buf_new == NULL) {
+					LOG_ERROR(LOG_PREFIX "failed to pad JTAG buffer to word boundary");
+					free(buffer);
+					break;
+				}
+				buffer = buf_new;
+			}
+			retval = lsejtag_cmd_ir_dr_scan(cmd->cmd.scan->ir_scan, true, true,
+				scan_length, buffer, buffer);
+			if (retval != ERROR_OK) {
+				LOG_ERROR(LOG_PREFIX "failed executing JTAG_SCAN (%" PRId32 ")", retval);
+			}
+			if (jtag_read_buffer((uint8_t *)buffer, cmd->cmd.scan) != ERROR_OK)
+				retval = ERROR_JTAG_QUEUE_FAILED;
+			free(buffer);
 			break;
                 case JTAG_TLR_RESET:
 			LOG_ERROR(LOG_PREFIX "JTAG_TLR_RESET unsupported: No bit-banged JTAG support");
@@ -467,8 +537,10 @@ int lsejtag_iface_execute_queue(struct jtag_command *cmd_queue)
 			LOG_ERROR(LOG_PREFIX "JTAG_RUNTEST unsupported: No bit-banged JTAG support");
 			break;
                 case JTAG_RESET:
-			lsejtag_cmd_io_manip(IO_TRST, cmd->cmd.reset->trst);
-			lsejtag_cmd_io_manip(IO_BRST, cmd->cmd.reset->srst);
+			LOG_DEBUG_IO(LOG_PREFIX "JTAG_RESET TRST=%" PRIu32 " SRST=%" PRIu32,
+				cmd->cmd.reset->trst, cmd->cmd.reset->srst);
+			lsejtag_cmd_io_manip(IO_TRST, !cmd->cmd.reset->trst);
+			lsejtag_cmd_io_manip(IO_BRST, !cmd->cmd.reset->srst);
 			break;
                 case JTAG_PATHMOVE:
 			LOG_ERROR(LOG_PREFIX "JTAG_PATHMOVE unsupported: No bit-banged JTAG support");
@@ -496,7 +568,7 @@ int lsejtag_iface_execute_queue(struct jtag_command *cmd_queue)
 
 static struct jtag_interface loongson_ejtag_interface = {
 	.supported = 0,
-	.execute_queue = NULL,
+	.execute_queue = lsejtag_iface_execute_queue,
 };
 
 struct adapter_driver loongson_ejtag_adapter_driver = {
