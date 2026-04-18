@@ -331,6 +331,24 @@ int lsejtag_cmd_io_manip(int pin_id, bool level)
 	return lsejtag_impl_send_recv(false);
 }
 
+/**
+ * @brief Issue an IR/DR scan to the probe. Probe will take care of TMS sequence
+ * and you only need to provide IR/DR sequences.
+ * Loongson EJTAG probes are capable of buffering or discarding the captured TDO
+ * data. If you set \@buffer_tdo and \@return_buffer both to true, captured TDO
+ * will be returned to PC immediately, padded to 32-bit word boundary. If you
+ * only set \@buffer_tdo to true, TDO sequence will be captured but stored in
+ * a FIFO on probe. If you set \@return_buffer to true, all content in that FIFO
+ * will be sent back to PC after current scan is over.
+ * 
+ * @param is_ir true for an IR scan, false for a DR scan
+ * @param buffer_tdo whether TDO data should be captured by probe
+ * @param return_buffer whether TDO data buffer should be sent back
+ * @param nbits bit length of the IR/DR scan
+ * @param scan_in_data IR/DR scan data. Must be padded to 32-bit word boundary
+ * @param scan_out_data IR/DR scan output. Must be padded to 32-bit word boundary
+ * @return int Error code
+ */
 int lsejtag_cmd_ir_dr_scan(bool is_ir, bool buffer_tdo, bool return_buffer,
 	uint16_t nbits, uint32_t *scan_in_data, uint32_t *scan_out_data)
 {
