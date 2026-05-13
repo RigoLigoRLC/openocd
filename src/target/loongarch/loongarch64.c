@@ -14,6 +14,8 @@
 
 #include "loongarch64.h"
 #include "target/target_type.h"
+#include "helper/command.h"
+#include "target/loongarch/loongarch_ejtag.h"
 
 /*******************************************************************************
  *       Registers
@@ -243,7 +245,7 @@ static int loongarch64_poll(struct target *target)
 	int retval;
 
 	// Read Control register
-	loongarch_ejtag_set_instr(ejtag_info, LAEJTAG_INST_CONTROL);
+	loongarch_ejtag_add_write_ir(ejtag_info, LAEJTAG_INST_CONTROL);
 	loongarch_ejtag_drscan_32(ejtag_info, &ejtag_ctrl);
 
 	// The MIPS counterpart tries to detect Rocc bit here but LoongArch
@@ -532,6 +534,15 @@ static int loongarch64_examine(struct target *target)
 	return ERROR_OK;
 }
 
+static const struct command_registration loongarch64_commands[] = {
+	{
+		/* It has nowhere else to go, wired on LoongArch64 handler table for convenience */
+		.chain = loongarch_ejtag_command_handlers
+	},
+	COMMAND_REGISTRATION_DONE
+	// TODO: commands for LoongArch64 targets
+};
+
 struct target_type loongarch64_target = {
 	.name = "loongarch64",
 	
@@ -561,6 +572,7 @@ struct target_type loongarch64_target = {
 	.add_watchpoint = NULL,
 	.remove_watchpoint = NULL,
 
+	.commands = loongarch64_commands,
 	.target_create = loongarch64_target_create,
 	.init_target = loongarch64_init_target,
 	.examine = loongarch64_examine,

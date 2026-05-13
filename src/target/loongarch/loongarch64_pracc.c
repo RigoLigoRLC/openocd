@@ -35,6 +35,9 @@
 #include "loongarch64_pracc.h"
 
 #include <jtag/adapter.h>
+#include "helper/log.h"
+#include "target/loongarch/loongarch_ejtag.h"
+#include <stdbool.h>
 
 #define STACK_DEPTH	32
 
@@ -59,7 +62,7 @@ static int wait_for_pracc_rw(struct loongarch_ejtag *ejtag_info, uint32_t *ctrl)
 	int retval;
 
 	while (1) {
-		loongarch_ejtag_set_instr(ejtag_info, LAEJTAG_INST_CONTROL);
+		loongarch_ejtag_add_write_ir(ejtag_info, LAEJTAG_INST_CONTROL);
 		ejtag_ctrl = LAEJTAG_CTRL_PRACC | LAEJTAG_CTRL_PROBEN |
 			     LAEJTAG_CTRL_PROBTRAP;
 		retval = loongarch_ejtag_drscan_32(ejtag_info, &ejtag_ctrl);
@@ -81,10 +84,56 @@ static int wait_for_pracc_rw(struct loongarch_ejtag *ejtag_info, uint32_t *ctrl)
 	return ERROR_OK;
 }
 
+/**
+ * @brief A unified function to "handle CPU accesses", or, "read/write DATA and clear PrAcc".
+ * This function may choose to use FASTDATA or DATA+CONTROL transactions depending on an option
+ * user can select with "loongarch-ejtag use-fastdata" command.
+ * 
+ * @param ejtag_info LoongArch EJTAG information block.
+ * @param data The data CPU will see / CPU wants to write to probe side when this access finishes
+ * @param is_read true: finish a memory read access from CPU (write *data to DATA and clear SPrAcc)
+ * 		  false: finish a memory write access from CPU (read DATA to *data and clear SPrAcc)
+ * @return int error code.
+ */
+static int loongarch64_pracc_handle_access(struct loongarch_ejtag *ejtag_info,
+					   uint64_t *data,
+					   bool is_read) {
+	const bool use_fastdata = loongarch_ejtag_get_use_fastdata();
+	uint32_t ejtag_ctrl;
+	int retval;
+
+	if (is_read) {
+		if (use_fastdata) {
+			/* Send the data via FASTDATA */
+			loongarch_ejtag_add_write_ir(ejtag_info, LAEJTAG_INST_FASTDATA);
+			retval = loongarch_ejtag_fastdata_scan_64(ejtag_info, data, false, false);
+		} else {
+			/* Send the data out */
+			loongarch_ejtag_add_write_ir(ejtag_info, LAEJTAG_INST_DATA);
+			retval = loongarch_ejtag_drscan_64(ejtag_info, data);
+			if (retval != ERROR_OK) {
+				return retval;
+			}
+
+			/* Finish the memory access */
+			ejtag_ctrl = LAEJTAG_CTRL_PROBEN | LAEJTAG_CTRL_PROBTRAP;
+			loongarch_ejtag_add_write_ir(ejtag_info, LAEJTAG_INST_CONTROL);
+			retval = loongarch_ejtag_drscan_32(ejtag_info, &ejtag_ctrl);
+		}
+	} else {
+		if (use_fastdata) {
+			retval = ERROR_NOT_IMPLEMENTED;
+		} else {
+			retval = ERROR_NOT_IMPLEMENTED;
+		}
+	}
+
+	return retval;
+}
+
 static int loongarch64_pracc_exec_read(struct loongarch64_pracc_context *ctx, uint64_t address) {
 	struct loongarch_ejtag *ejtag_info = ctx->ejtag_info;
 	unsigned int offset;
-	uint32_t ejtag_ctrl;
 	uint64_t data;
 	int retval;
 
@@ -141,21 +190,11 @@ static int loongarch64_pracc_exec_read(struct loongarch64_pracc_context *ctx, ui
 	}
 
 	/* Send the data out */
-	loongarch_ejtag_set_instr(ejtag_info, LAEJTAG_INST_DATA);
-	retval = loongarch_ejtag_drscan_64(ejtag_info, &data);
+	retval = loongarch64_pracc_handle_access(ejtag_info, &data, true);
+
 	if (retval != ERROR_OK) {
 		return retval;
 	}
-
-	/* Finish the memory access */
-	ejtag_ctrl = LAEJTAG_CTRL_PROBEN | LAEJTAG_CTRL_PROBTRAP;
-	loongarch_ejtag_set_instr(ejtag_info, LAEJTAG_INST_CONTROL);
-	retval = loongarch_ejtag_drscan_32(ejtag_info, &ejtag_ctrl);
-	if (retval != ERROR_OK) {
-		return retval;
-	}
-
-	// jtag_add_clocks(5);
 
 	return jtag_execute_queue();
 }
@@ -168,7 +207,7 @@ static int loongarch64_pracc_exec_write(struct loongarch64_pracc_context *ctx, u
 	int retval;
 
 	/* Get the data written by CPU */
-	loongarch_ejtag_set_instr(ejtag_info, LAEJTAG_INST_DATA);
+	loongarch_ejtag_add_write_ir(ejtag_info, LAEJTAG_INST_DATA);
 	retval = loongarch_ejtag_drscan_64(ejtag_info, &data);
 	if (retval != ERROR_OK) {
 		return retval;
@@ -176,7 +215,7 @@ static int loongarch64_pracc_exec_write(struct loongarch64_pracc_context *ctx, u
 
 	/* Finish the memory access */
 	ejtag_ctrl = ejtag_info->ejtag_ctrl & ~LAEJTAG_CTRL_PRACC;
-	loongarch_ejtag_set_instr(ejtag_info, LAEJTAG_INST_CONTROL);
+	loongarch_ejtag_add_write_ir(ejtag_info, LAEJTAG_INST_CONTROL);
 	retval = loongarch_ejtag_drscan_32(ejtag_info, &ejtag_ctrl);
 	if (retval != ERROR_OK) {
 		return retval;
@@ -283,7 +322,7 @@ int loongarch64_pracc_exec(struct loongarch_ejtag *ejtag_info,
 			return retval;
 		}
 
-		loongarch_ejtag_set_instr(ejtag_info, LAEJTAG_INST_ADDRESS);
+		loongarch_ejtag_add_write_ir(ejtag_info, LAEJTAG_INST_ADDRESS);
 		loongarch_ejtag_drscan_64(ejtag_info, &address);
 		LOG_DEBUG("-> %08" PRIx64, address);
 

@@ -36,16 +36,28 @@ struct loongarch_ejtag {
 	uint32_t ejtag_ctrl;
 };
 
-void loongarch_ejtag_set_instr(struct loongarch_ejtag *ejtag_info, uint32_t new_instr);
+extern const struct command_registration loongarch_ejtag_command_handlers[];
+
+void loongarch_ejtag_add_write_ir(struct loongarch_ejtag *ejtag_info, uint32_t new_instr);
 
 int loongarch_ejtag_drscan_64(struct loongarch_ejtag *ejtag_info, uint64_t *data);
+int loongarch_ejtag_fastdata_scan_64(struct loongarch_ejtag *ejtag_info,
+				     uint64_t *data,
+				     bool spracc,
+				     bool readback);
 void loongarch_ejtag_drscan_32_out(struct loongarch_ejtag *ejtag_info, uint32_t data);
 int loongarch_ejtag_drscan_32(struct loongarch_ejtag *ejtag_info, uint32_t *data);
+int loongarch_ejtag_fastdata_scan_32(struct loongarch_ejtag *ejtag_info,
+				     uint32_t *data,
+				     bool spracc,
+				     bool readback); // TODO: LA32?
 
 int loongarch_ejtag_get_idcode(struct loongarch_ejtag *ejtag_info);
 
 int loongarch_ejtag_init(struct loongarch_ejtag *ejtag_info);
 int loongarch_ejtag_enter_debug(struct loongarch_ejtag *ejtag_info);
 int loongarch_ejtag_exit_debug(struct loongarch_ejtag *ejtag_info);
+
+bool loongarch_ejtag_get_use_fastdata(void);
 
 #endif /* OPENOCD_TARGET_LOONGARCH_EJTAG_H */

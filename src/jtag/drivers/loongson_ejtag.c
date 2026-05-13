@@ -515,11 +515,29 @@ static int lsejtag_quit(void)
  * @{
  */
 
+/**
+ * @brief Utility function to check if this scan command requires TDO readback.
+ * Disabling TDO readback may reduce the load on the probe slightly.
+ * 
+ * @param scan Scan command
+ * @return whether this scan command requires TDO readback.
+ */
+static bool lsejtag_check_scan_requires_readback(struct scan_command *scan)
+{
+	for (unsigned int i = 0; i < scan->num_fields; ++i) {
+		if (scan->fields[i].in_value != NULL) {
+			return true;
+		}
+	}
+	return false;
+}
+
 int lsejtag_iface_execute_queue(struct jtag_command *cmd_queue)
 {
 	struct jtag_command *cmd = cmd_queue; /* currently processed command */
 	int retval = ERROR_OK;
 	int scan_length = 0;
+	bool readback;
 	uint32_t *buffer = NULL;
 
 	// Loongson EJTAG adapter do not support bit-banged JTAG. You can only
@@ -539,13 +557,16 @@ int lsejtag_iface_execute_queue(struct jtag_command *cmd_queue)
 				}
 				buffer = buf_new;
 			}
-			retval = lsejtag_cmd_ir_dr_scan(cmd->cmd.scan->ir_scan, true, true,
+			readback = lsejtag_check_scan_requires_readback(cmd->cmd.scan);
+			retval = lsejtag_cmd_ir_dr_scan(cmd->cmd.scan->ir_scan, readback, readback,
 				scan_length, buffer, buffer);
 			if (retval != ERROR_OK) {
 				LOG_ERROR(LOG_PREFIX "failed executing JTAG_SCAN (%" PRId32 ")", retval);
 			}
-			if (jtag_read_buffer((uint8_t *)buffer, cmd->cmd.scan) != ERROR_OK)
+			if (readback &&
+				jtag_read_buffer((uint8_t *)buffer, cmd->cmd.scan) != ERROR_OK) {
 				retval = ERROR_JTAG_QUEUE_FAILED;
+			}
 			free(buffer);
 			break;
                 case JTAG_TLR_RESET:
@@ -582,6 +603,28 @@ int lsejtag_iface_execute_queue(struct jtag_command *cmd_queue)
 
 /**
  * @} // JTAG interface functions
+ */
+
+/**
+ * @defgroup Loongson EJTAG related commands
+ * @{
+ */
+
+
+ // TODO: Dont commit this. this is a stub
+// static const struct command_registration loongarch_ejtag_command_handlers[] = {
+// 	{
+// 		.name = "use_fastdata",
+// 		.handler = NULL, // TODO
+// 		.mode = COMMAND_ANY,
+// 		.usage = "['enable'|'disable']",
+// 		.help = "Specify whether to use FASTDATA for EJTAG accesses (enabled by default)",
+// 	},
+// 	COMMAND_REGISTRATION_DONE
+// };
+
+/**
+ * @} // Loongson EJTAG related commands
  */
 
 static struct jtag_interface loongson_ejtag_interface = {
