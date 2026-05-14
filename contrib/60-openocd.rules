@@ -275,4 +275,7 @@ ATTRS{idVendor}=="c251", ATTRS{idProduct}=="2750", MODE="660", GROUP="plugdev", 
 # CMSIS-DAP compatible adapters
 ATTRS{product}=="*CMSIS-DAP*", MODE="660", GROUP="plugdev", TAG+="uaccess"
 
+# Loongson EJTAG adapter and compatibles
+ATTRS{idVendor}=="2961", ATTRS{idProduct}=="6688", MODE="660", GROUP="plugdev", TAG+="uaccess"
+
 LABEL="openocd_rules_end"
