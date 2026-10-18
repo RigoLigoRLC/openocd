@@ -1,15 +1,21 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 
-/***************************************************************************
- *   Copyright (C) 2025 by RigoLigo <rigoligo03@gmail.com>                 *
- *   Initial LoongArch support is based on MIPS code.                      *
- ***************************************************************************/
+/*
+ * Support for LoongArch64 processors with LJTAG debugging capability:
+ * reusable JTAG register read/write primitives.
+ *
+ *   Copyright (C) 2025-2026 by RigoLigo <rigoligo03@gmail.com>
+ * 
+ * Initial LoongArch support is based on OpenOCD MIPS implementation,
+ * and LJTAG implementation from OpenLA132 open source CPU core
+ * (https://github.com/loongson/OpenLACores/).
+ */
 
 #ifdef HAVE_CONFIG_H
 #include "config.h"
 #endif
 
-#include "loongarch64_pracc.h"
+#include "loongarch64_dbgm.h"
 #include "loongarch64.h"
 #include "helper/command.h"
 #include <stdint.h>
@@ -19,10 +25,10 @@
  */
 static bool cfg_use_fastdata = true; /* Should FASTDATA be used instead of DATA+CONTROL */
 
-void loongarch_ejtag_add_write_ir(struct loongarch_ejtag *ejtag_info, uint32_t new_instr)
+void loongarch_ljtag_add_write_ir(struct loongarch_ljtag *ljtag_info, uint32_t new_instr)
 {
-	assert(ejtag_info->tap);
-	struct jtag_tap *tap = ejtag_info->tap;
+	assert(ljtag_info->tap);
+	struct jtag_tap *tap = ljtag_info->tap;
 
 	/*
 	 * Quirk: At least as tested with LS2K0300: you MUST write IR before 
@@ -45,12 +51,12 @@ void loongarch_ejtag_add_write_ir(struct loongarch_ejtag *ejtag_info, uint32_t n
 	}
 }
 
-int loongarch_ejtag_drscan_64(struct loongarch_ejtag *ejtag_info, uint64_t *data)
+int loongarch_ljtag_drscan_64(struct loongarch_ljtag *ljtag_info, uint64_t *data)
 {
 	// TODO: bool readback
-	struct jtag_tap *tap = ejtag_info->tap;
+	struct jtag_tap *tap = ljtag_info->tap;
 	if (!tap) {
-		LOG_ERROR("ejtag_info->tap is NULL!");
+		LOG_ERROR("ljtag_info->tap is NULL!");
 		return ERROR_FAIL;
 	}
 
@@ -78,34 +84,34 @@ int loongarch_ejtag_drscan_64(struct loongarch_ejtag *ejtag_info, uint64_t *data
 }
 
 /**
- * @brief Execute a DR scan with 64 bit data, provided you've already queued an IR scan setting it
- * to FASTDATA or IR is already set to FASTDATA.
+ * @brief Execute a DR scan with 64 bit data, provided you've already queued an IR scan that set it
+ * to FASTDATA, or IR is already set to FASTDATA.
  * 
- * @param ejtag_info EJTAG context object
+ * @param ljtag_info LJTAG context object
  * @param data pointer to a 64-bit data. Overwritten with DATA register readback if enabled.
- * @param spracc the state of SPrAcc register you want to set. false for clear, true for assert.
+ * @param pr the state of PR field you want to set. false for clear, true for assert.
  * @param readback whether you want DATA register be read back.
  * @return int error code
  */
-int loongarch_ejtag_fastdata_scan_64(struct loongarch_ejtag *ejtag_info,
+int loongarch_ljtag_fastdata_scan_64(struct loongarch_ljtag *ljtag_info,
 				     uint64_t *data,
-				     bool spracc,
+				     bool pr,
 				     bool readback)
 {
-	struct jtag_tap *tap = ejtag_info->tap;
+	struct jtag_tap *tap = ljtag_info->tap;
 	if (!tap) {
-		LOG_ERROR("ejtag_info->tap is NULL!");
+		LOG_ERROR("ljtag_info->tap is NULL!");
 		return ERROR_FAIL;
 	}
 
 	struct scan_field field[2];
 	uint8_t out[8] = { 0 }, in[8];
-	uint8_t spracc_u8 = spracc;
+	uint8_t pr_u8 = pr;
 	int retval;
 
-	/* SPrAcc first */
+	/* PR field first */
 	field[0].num_bits = 1;
-	field[0].out_value = &spracc_u8;
+	field[0].out_value = &pr_u8;
 	field[0].in_value = NULL;
 
 	/* then comes the data register */
@@ -114,7 +120,7 @@ int loongarch_ejtag_fastdata_scan_64(struct loongarch_ejtag *ejtag_info,
 	buf_set_u64(out, 0, field[1].num_bits, *data);
 
 	/* If TDO readback is not required, set in_value to NULL */
-	/* This can save Loongson EJTAG some processing time */
+	/* This can save Loongson LJTAG some processing time */
 	if (readback) {
 		field[1].in_value = in;
 	} else {
@@ -137,11 +143,11 @@ int loongarch_ejtag_fastdata_scan_64(struct loongarch_ejtag *ejtag_info,
 	return ERROR_OK;
 }
 
-static void loongarch_ejtag_drscan_32_queued(struct loongarch_ejtag *ejtag_info,
+static void loongarch_ljtag_drscan_32_queued(struct loongarch_ljtag *ljtag_info,
 		uint32_t data_out, uint8_t *data_in)
 {
-	assert(ejtag_info->tap);
-	struct jtag_tap *tap = ejtag_info->tap;
+	assert(ljtag_info->tap);
+	struct jtag_tap *tap = ljtag_info->tap;
 
 	struct scan_field field;
 	field.num_bits = 32;
@@ -157,16 +163,16 @@ static void loongarch_ejtag_drscan_32_queued(struct loongarch_ejtag *ejtag_info,
 }
 
 // FIXME: is this thing actually useful?
-void loongarch_ejtag_drscan_32_out(struct loongarch_ejtag *ejtag_info, uint32_t data)
+void loongarch_ljtag_drscan_32_out(struct loongarch_ljtag *ljtag_info, uint32_t data)
 {
-	loongarch_ejtag_drscan_32_queued(ejtag_info, data, NULL);
+	loongarch_ljtag_drscan_32_queued(ljtag_info, data, NULL);
 }
 
-int loongarch_ejtag_drscan_32(struct loongarch_ejtag *ejtag_info, uint32_t *data)
+int loongarch_ljtag_drscan_32(struct loongarch_ljtag *ljtag_info, uint32_t *data)
 {
 	// TODO: bool readback
 	uint8_t scan_in[4];
-	loongarch_ejtag_drscan_32_queued(ejtag_info, *data, scan_in);
+	loongarch_ljtag_drscan_32_queued(ljtag_info, *data, scan_in);
 
 	int retval = jtag_execute_queue();
 	if (retval != ERROR_OK) {
@@ -178,52 +184,53 @@ int loongarch_ejtag_drscan_32(struct loongarch_ejtag *ejtag_info, uint32_t *data
 	return ERROR_OK;
 }
 
-int loongarch_ejtag_get_idcode(struct loongarch_ejtag *ejtag_info)
+int loongarch_ljtag_get_idcode(struct loongarch_ljtag *ljtag_info)
 {
-	loongarch_ejtag_add_write_ir(ejtag_info, LAEJTAG_INST_IDCODE);
+	loongarch_ljtag_add_write_ir(ljtag_info, LJTAG_INST_IDCODE);
 
-	ejtag_info->idcode = 0;
-	return loongarch_ejtag_drscan_32(ejtag_info, &ejtag_info->idcode);
+	ljtag_info->idcode = 0;
+	return loongarch_ljtag_drscan_32(ljtag_info, &ljtag_info->idcode);
 }
 
-int loongarch_ejtag_init(struct loongarch_ejtag *ejtag_info)
+int loongarch_ljtag_init(struct loongarch_ljtag *ljtag_info)
 {
-	int retval = loongarch_ejtag_get_idcode(ejtag_info);
+	int retval = loongarch_ljtag_get_idcode(ljtag_info);
 	if (retval != ERROR_OK)  {
 		LOG_ERROR("IDCODE read failed");
 		return retval;
 	}
 
 	/* Current LoongArch devices all have IDCODE=0x5a5a5a5a, check this */
-	if (ejtag_info->idcode != 0x5A5A5A5A) {
-		LOG_ERROR("Invalid IDCODE (not 0x5A5A5A5A)");
+	if (ljtag_info->idcode != 0x5A5A5A5A) {
+		LOG_ERROR("Invalid IDCODE (0x%08" PRIx32 " != 0x5A5A5A5A)",
+			  ljtag_info->idcode);
 		return ERROR_FAIL;
 	}
 
 	/* Set ProbEn and ProbTrap as we're always going to use them */
-	ejtag_info->ejtag_ctrl = LAEJTAG_CTRL_PRACC | LAEJTAG_CTRL_PROBEN |
-			LAEJTAG_CTRL_PROBTRAP;
+	ljtag_info->ljtag_ctrl = LJTAG_CTRL_PR | LJTAG_CTRL_PEN |
+			LJTAG_CTRL_PROBTRAP;
 
 	return ERROR_OK;
 }
 
-int loongarch_ejtag_enter_debug(struct loongarch_ejtag *ejtag_info)
+int loongarch_ljtag_enter_debug(struct loongarch_ljtag *ljtag_info)
 {
-	uint32_t ejtag_ctrl;
+	uint32_t ljtag_ctrl;
 	int retry_count;
 
 	// Quirk: May require retrying a few times before DM bit can be set
 	for (retry_count = 5; retry_count != 0; --retry_count) {
-		loongarch_ejtag_add_write_ir(ejtag_info, LAEJTAG_INST_CONTROL);
+		loongarch_ljtag_add_write_ir(ljtag_info, LJTAG_INST_CONTROL);
 
 		/* set debug break bit */
-		ejtag_ctrl = LAEJTAG_CTRL_JTAGBRK | LAEJTAG_CTRL_PRACC
-			| LAEJTAG_CTRL_PROBEN | LAEJTAG_CTRL_PROBTRAP;
-		loongarch_ejtag_drscan_32(ejtag_info, &ejtag_ctrl);
+		ljtag_ctrl = LJTAG_CTRL_BREAK | LJTAG_CTRL_PR | LJTAG_CTRL_PEN
+			| LJTAG_CTRL_PROBTRAP;
+		loongarch_ljtag_drscan_32(ljtag_info, &ljtag_ctrl);
 		
 		/* See if we stopped processor */
-		LOG_DEBUG("enter_debug: control=0x%08" PRIx32 "", ejtag_ctrl);
-		if (ejtag_ctrl & LAEJTAG_CTRL_DM) {
+		LOG_DEBUG("enter_debug: control=0x%08" PRIx32 "", ljtag_ctrl);
+		if (ljtag_ctrl & LJTAG_CTRL_DM) {
 			return ERROR_OK;
 		}
 	}
@@ -232,31 +239,31 @@ int loongarch_ejtag_enter_debug(struct loongarch_ejtag *ejtag_info)
 	return ERROR_FAIL;
 }
 
-int loongarch_ejtag_exit_debug(struct loongarch_ejtag *ejtag_info)
+int loongarch_ljtag_exit_debug(struct loongarch_ljtag *ljtag_info)
 {
 	const uint32_t code[] = {
 		LOONG64_ERTN,
 		LOONG64_ERTN,
 	};
 	
-	return loongarch64_pracc_exec(ejtag_info, ARRAY_SIZE(code), code, 0,
+	return loongarch64_dbgm_exec(ljtag_info, ARRAY_SIZE(code), code, 0,
 		NULL, 0, NULL);
 }
 
 /**
  * @brief Get the config state of whether the use of FASTDATA is allowed
  */
-bool loongarch_ejtag_get_use_fastdata(void)
+bool loongarch_ljtag_get_use_fastdata(void)
 {
 	return cfg_use_fastdata;
 }
 
 /**
- * @defgroup Global LoongArch CPUs EJTAG debugging configuration commands
+ * @defgroup Global LoongArch CPUs LJTAG debugging configuration commands
  * @{
  */
 
-COMMAND_HANDLER(loongarch_ejtag_handle_use_fastdata)
+COMMAND_HANDLER(loongarch_ljtag_handle_use_fastdata)
 {
 	if (CMD_ARGC > 1) {
 		return ERROR_COMMAND_SYNTAX_ERROR;
@@ -279,28 +286,28 @@ COMMAND_HANDLER(loongarch_ejtag_handle_use_fastdata)
 	return ERROR_OK;
 }
 
-static const struct command_registration loongarch_ejtag_exec_command_handlers[] = {
+static const struct command_registration loongarch_ljtag_exec_command_handlers[] = {
 	{
 		.name = "use-fastdata",
-		.handler = loongarch_ejtag_handle_use_fastdata,
+		.handler = loongarch_ljtag_handle_use_fastdata,
 		.mode = COMMAND_ANY,
 		.usage = "['enable'|'disable']",
-		.help = "Specify whether to use FASTDATA for EJTAG accesses (enabled by default)",
+		.help = "Specify whether to use FASTDATA for LJTAG accesses (enabled by default)",
 	},
 	COMMAND_REGISTRATION_DONE
 };
 
-const struct command_registration loongarch_ejtag_command_handlers[] = {
+const struct command_registration loongarch_ljtag_command_handlers[] = {
 	{
-		.name = "loongarch-ejtag",
+		.name = "loongarch-ljtag",
 		.mode = COMMAND_ANY,
 		.usage = "",
-		.help = "Configure global LoongArch CPU EJTAG debugging behavior",
-		.chain = loongarch_ejtag_exec_command_handlers
+		.help = "Configure global LoongArch CPU LJTAG debugging behavior",
+		.chain = loongarch_ljtag_exec_command_handlers
 	},
 	COMMAND_REGISTRATION_DONE
 };
 
 /**
- * @} // Global LoongArch CPUs EJTAG debugging configuration commands
+ * @} // Global LoongArch CPUs LJTAG debugging configuration commands
  */

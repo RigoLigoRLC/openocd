@@ -1,16 +1,22 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 
-/***************************************************************************
- *   Copyright (C) 2025 by RigoLigo <rigoligo03@gmail.com>                 *
- *   Initial LoongArch support is based on MIPS code.                      *
- ***************************************************************************/
+/*
+ * Support for LoongArch64 processors with LJTAG debugging capability:
+ * LoongArch64 architecture definitions and common operations.
+ *
+ *   Copyright (C) 2025-2026 by RigoLigo <rigoligo03@gmail.com>
+ * 
+ * Initial LoongArch support is based on OpenOCD MIPS implementation,
+ * and LJTAG implementation from OpenLA132 open source CPU core
+ * (https://github.com/loongson/OpenLACores/).
+ */
 
 #ifndef OPENOCD_TARGET_LOONGARCH64_H
 #define OPENOCD_TARGET_LOONGARCH64_H
 
 #include "target/target.h"
 #include "target/register.h"
-#include "loongarch64_pracc.h"
+#include "loongarch64_dbgm.h"
 
 #define LOONG64_COMMON_MAGIC	0x62646264U
 
@@ -24,7 +30,7 @@ struct loongarch64_common {
 
 	void *arch_info;			/* back pointer to parent */
 	struct reg_cache *core_cache;
-	struct loongarch_ejtag ejtag_info;
+	struct loongarch_ljtag ljtag_info;
 	uint64_t core_regs[LOONG64_NUM_REGS];
 
 	struct working_area *fast_data_area;

@@ -16,7 +16,6 @@
 
 #include <jtag/jtag.h>
 #include <jtag/swim.h>
-#include <jtag/lsejtag_interface.h>
 #include <target/arm_tpiu_swo.h>
 #include <transport/transport.h>
 
@@ -362,9 +361,6 @@ struct adapter_driver {
 
 	/* SWIM APIs */
 	const struct swim_driver *swim_ops;
-
-	/* Loongson EJTAG APIs */
-	const struct lsejtag_interface *lsejtag_ops;
 };
 
 int adapter_resets(int assert_trst, int assert_srst);
@@ -401,7 +397,7 @@ extern struct adapter_driver jtag_vpi_adapter_driver;
 extern struct adapter_driver kitprog_adapter_driver;
 extern struct adapter_driver linuxgpiod_adapter_driver;
 extern struct adapter_driver linuxspidev_adapter_driver;
-extern struct adapter_driver loongson_ejtag_adapter_driver;
+extern struct adapter_driver loongson_ljtag_adapter_driver;
 extern struct adapter_driver opendous_adapter_driver;
 extern struct adapter_driver openjtag_adapter_driver;
 extern struct adapter_driver osbdm_adapter_driver;

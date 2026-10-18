@@ -1,11 +1,14 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 /*
- * Support for LoongArch64 processors with EJTAG-style debugging capability:
+ * Support for LoongArch64 processors with LJTAG debugging capability:
+ * LoongArch64 architecture definitions and common operations.
  *
- *   Copyright (C) 2025 by RigoLigo <rigoligo03@gmail.com>
+ *   Copyright (C) 2025-2026 by RigoLigo <rigoligo03@gmail.com>
  * 
- * Initial LoongArch support is based on MIPS code.
+ * Initial LoongArch support is based on OpenOCD MIPS implementation,
+ * and LJTAG implementation from OpenLA132 open source CPU core
+ * (https://github.com/loongson/OpenLACores/).
  */
 
 #ifdef HAVE_CONFIG_H
@@ -15,7 +18,7 @@
 #include "loongarch64.h"
 #include "target/target_type.h"
 #include "helper/command.h"
-#include "target/loongarch/loongarch_ejtag.h"
+#include "target/loongarch/loongarch_ljtag.h"
 
 /*******************************************************************************
  *       Registers
@@ -64,7 +67,7 @@ static const struct {
 	{ 33, "badv", REG_TYPE_UINT64, "org.gnu.gdb.loongarch.base", "CSR" },
 };
 
-// Merely transfers core register value from PrAcc buffer into core cache
+// Merely transfers core register value from dbgm read buffer into core cache
 static int loongarch64_get_core_reg(struct reg *reg)
 {
 	struct loongarch64_core_reg *loongarch64_reg = reg->arch_info;
@@ -90,7 +93,7 @@ static int loongarch64_get_core_reg(struct reg *reg)
 	return ERROR_OK;
 }
 
-// Just sets core cache register value, not transferred into PrAcc buffer
+// Just sets core cache register value, not transferred into dbgm buffer
 static int loongarch64_set_core_reg(struct reg *reg, uint8_t *buf)
 {
 	struct loongarch64_core_reg *loongarch64_reg = reg->arch_info;
@@ -215,12 +218,12 @@ int loongarch64_invalidate_core_regs(struct target *target)
 static int loongarch64_debug_entry(struct target *target)
 {
 	struct loongarch64_common *loongarch64 = target->arch_info;
-	struct loongarch_ejtag *ejtag_info = &loongarch64->ejtag_info;
+	struct loongarch_ljtag *ljtag_info = &loongarch64->ljtag_info;
 	struct reg *pc = &loongarch64->core_cache->reg_list[LOONG64_PC];
 	int retval;
 
 	// Read registers and save context
-	retval = loongarch64_pracc_read_regs(ejtag_info, loongarch64->core_regs);
+	retval = loongarch64_dbgm_read_regs(ljtag_info, loongarch64->core_regs);
 	if (retval != ERROR_OK) {
 		LOG_ERROR("Failed to read registers (%d)", retval);
 		return retval;
@@ -240,20 +243,20 @@ static int loongarch64_debug_entry(struct target *target)
 static int loongarch64_poll(struct target *target)
 {
 	struct loongarch64_common *loongarch64 = target->arch_info;
-	struct loongarch_ejtag *ejtag_info = &loongarch64->ejtag_info;
-	uint32_t ejtag_ctrl = ejtag_info->ejtag_ctrl;
+	struct loongarch_ljtag *ljtag_info = &loongarch64->ljtag_info;
+	uint32_t ljtag_ctrl = ljtag_info->ljtag_ctrl;
 	int retval;
 
 	// Read Control register
-	loongarch_ejtag_add_write_ir(ejtag_info, LAEJTAG_INST_CONTROL);
-	loongarch_ejtag_drscan_32(ejtag_info, &ejtag_ctrl);
+	loongarch_ljtag_add_write_ir(ljtag_info, LJTAG_INST_CONTROL);
+	loongarch_ljtag_drscan_32(ljtag_info, &ljtag_ctrl);
 
 	// The MIPS counterpart tries to detect Rocc bit here but LoongArch
 	// processors don't seem to have implemented a reset mechanism from
-	// EJTAG so we're omitting this.
+	// LJTAG so we're omitting this.
 
 	// Check if CPU is in debug mode
-	if (ejtag_ctrl & LAEJTAG_CTRL_DM) {
+	if (ljtag_ctrl & LJTAG_CTRL_DM) {
 		if (target->state == TARGET_RUNNING ||
 			target->state == TARGET_UNKNOWN) {
 
@@ -271,18 +274,18 @@ static int loongarch64_poll(struct target *target)
 			}
 			target_call_event_callbacks(target, TARGET_EVENT_DEBUG_HALTED);
 		}
-	} else if (ejtag_ctrl & LAEJTAG_CTRL_PRACC) {
+	} else if (ljtag_ctrl & LJTAG_CTRL_PR) {
 		/* This is a quirk found on LS2K0300: when exiting debug mode
-		 * the processor still tries to make one more read from dmseg
+		 * the processor still tries to make one more read from dbgm
 		 * even though DM bit is already reset, and because of this
-		 * dmseg access, the processor is still in halt state.
+		 * dbgm access, the processor is still in halt state.
 		 * We attempt letting it go and declare it's running if
 		 * succeeded */
-		retval = loongarch_ejtag_exit_debug(ejtag_info);
+		retval = loongarch_ljtag_exit_debug(ljtag_info);
 		if (retval == ERROR_OK) {
 			target->state = TARGET_RUNNING;
 		} else {
-			LOG_ERROR("Quirk: target not in DM but stuck at dmseg");
+			LOG_ERROR("Quirk: target not in DM but stuck at dbgm");
 			target->state = TARGET_UNKNOWN;
 		}
 	} else {
@@ -312,7 +315,7 @@ int loongarch64_arch_state(struct target *target)
 static int loongarch64_halt(struct target *target)
 {
 	struct loongarch64_common *loongarch64 = target->arch_info;
-	struct loongarch_ejtag *ejtag_info = &loongarch64->ejtag_info;
+	struct loongarch_ljtag *ljtag_info = &loongarch64->ljtag_info;
 	int retval = ERROR_OK;
 
 	LOG_DEBUG("target->state: %s", target_state_name(target));
@@ -333,7 +336,7 @@ static int loongarch64_halt(struct target *target)
 		break;
 	}
 
-	retval = loongarch_ejtag_enter_debug(ejtag_info);
+	retval = loongarch_ljtag_enter_debug(ljtag_info);
 	if (retval != ERROR_OK) {
 		return retval;
 	}
@@ -348,7 +351,7 @@ static int loongarch64_resume(struct target *target, bool current,
 			      bool debug_execution)
 {
 	struct loongarch64_common *loongarch64 = target->arch_info;
-	struct loongarch_ejtag *ejtag_info = &loongarch64->ejtag_info;
+	struct loongarch_ljtag *ljtag_info = &loongarch64->ljtag_info;
 	int retval;
 
 	if (target->state != TARGET_HALTED) {
@@ -361,11 +364,11 @@ static int loongarch64_resume(struct target *target, bool current,
 	// TODO: debug_execution
 
 	// Exit debug mode
-	retval = loongarch_ejtag_exit_debug(ejtag_info);
+	retval = loongarch_ljtag_exit_debug(ljtag_info);
 	if (retval != ERROR_OK)
 		return retval;
 
-	// TODO: Mark register cache as invalid
+        
 
 	return ERROR_OK;
 }
@@ -374,7 +377,7 @@ static int loongarch64_read_memory(struct target *target, uint64_t address,
 	uint32_t size, uint32_t count, uint8_t *buffer)
 {
 	struct loongarch64_common *loongarch64 = target->arch_info;
-	struct loongarch_ejtag *ejtag_info = &loongarch64->ejtag_info;
+	struct loongarch_ljtag *ljtag_info = &loongarch64->ljtag_info;
 	int retval;
 	void *t;
 
@@ -404,10 +407,10 @@ static int loongarch64_read_memory(struct target *target, uint64_t address,
 	LOG_DEBUG("address: 0x%16.16" PRIx64 ", size: 0x%8.8" PRIx32 ", count: 0x%8.8" PRIx32 "",
 		  address, size, count);
 
-	retval = loongarch64_pracc_read_mem(ejtag_info, address, size, count, (void *)t);
+	retval = loongarch64_dbgm_read_mem(ljtag_info, address, size, count, (void *)t);
 
 	if (retval != ERROR_OK) {
-		LOG_ERROR("loongarch64_pracc_read_mem filed");
+		LOG_ERROR("loongarch64_dbgm_read_mem filed");
 		goto read_done;
 	}
 
@@ -434,7 +437,7 @@ static int loongarch64_write_memory(struct target *target, uint64_t address,
 	uint32_t size, uint32_t count, const uint8_t *buffer)
 {
 	struct loongarch64_common *loongarch64 = target->arch_info;
-	struct loongarch_ejtag *ejtag_info = &loongarch64->ejtag_info;
+	struct loongarch_ljtag *ljtag_info = &loongarch64->ljtag_info;
 	int retval;
 	void *t = NULL;
 
@@ -478,10 +481,10 @@ static int loongarch64_write_memory(struct target *target, uint64_t address,
 	LOG_DEBUG("address: 0x%16.16" PRIx64 ", size: 0x%8.8" PRIx32 ", count: 0x%8.8" PRIx32 "",
 		  address, size, count);
 
-	retval = loongarch64_pracc_write_mem(ejtag_info, address, size, count, (void *)buffer);
+	retval = loongarch64_dbgm_write_mem(ljtag_info, address, size, count, (void *)buffer);
 
 	if (retval != ERROR_OK) {
-		LOG_ERROR("loongarch64_pracc_read_mem filed");
+		LOG_ERROR("loongarch64_dbgm_read_mem filed");
 	}
 
 	free(t);
@@ -503,7 +506,7 @@ static int loongarch64_target_create(struct target *target)
 	target->arch_info = loongarch64;
 
 	// Initialize arch_info
-	loongarch64->ejtag_info.tap = target->tap;
+	loongarch64->ljtag_info.tap = target->tap;
 
 	return ERROR_OK;
 }
@@ -526,7 +529,7 @@ static int loongarch64_examine(struct target *target)
 	int retval;
 	struct loongarch64_common *loongarch64 = target->arch_info;
 
-	retval = loongarch_ejtag_init(&loongarch64->ejtag_info);
+	retval = loongarch_ljtag_init(&loongarch64->ljtag_info);
 	if (retval != ERROR_OK) {
 		return retval;
 	}
@@ -537,7 +540,7 @@ static int loongarch64_examine(struct target *target)
 static const struct command_registration loongarch64_commands[] = {
 	{
 		/* It has nowhere else to go, wired on LoongArch64 handler table for convenience */
-		.chain = loongarch_ejtag_command_handlers
+		.chain = loongarch_ljtag_command_handlers
 	},
 	COMMAND_REGISTRATION_DONE
 	// TODO: commands for LoongArch64 targets

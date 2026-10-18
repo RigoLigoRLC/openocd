@@ -219,8 +219,8 @@ endif
 if XVC
 DRIVERFILES += %D%/xvc.c
 endif
-if LSEJTAG
-DRIVERFILES += %D%/loongson_ejtag.c
+if LSLJTAG
+DRIVERFILES += %D%/loongson_ljtag.c
 endif
 
 DRIVERHEADERS = \

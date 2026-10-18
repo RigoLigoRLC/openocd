@@ -170,8 +170,8 @@ struct adapter_driver *adapter_drivers[] = {
 #if BUILD_XVC == 1
 		&xvc_adapter_driver,
 #endif
-#if BUILD_LSEJTAG == 1
-		&loongson_ejtag_adapter_driver,
+#if BUILD_LSLJTAG == 1
+		&loongson_ljtag_adapter_driver,
 #endif
 		NULL,
 };
