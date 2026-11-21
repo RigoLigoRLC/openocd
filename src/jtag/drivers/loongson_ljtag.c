@@ -105,6 +105,8 @@ static size_t mps_rx; ///< Maximum packet size for IN endpoint
  * @{
  */
 
+// Opcode
+
 #define OP_PROBE_MEM_RW 		0x01
 #define OP_IO_MANIP			0x03
 #define OP_IR_SCAN			0x04
@@ -115,6 +117,18 @@ static size_t mps_rx; ///< Maximum packet size for IN endpoint
 #define OP_FASTREAD			0x0E
 #define OP_FASTREAD_FASTDATA		0x0F
 #define OP_READ_VER			0x1F
+
+// Probe memory RW - addresses
+
+#define MEM_REG_JTAGCLK			0x81000070
+#define MEM_PTR_IRLEN			0x40
+#define MEM_PTR_IR_SKIP			0x44
+#define MEM_PTR_IR_CONTROL		0x48
+#define MEM_PTR_IR_DATA			0x4c
+#define MEM_PTR_IR_ADDRESS		0x50
+#define MEM_PTR_IR_FASTDATA		0x54
+
+// IO port IDs
 
 #define IO_LED				0x00
 #define IO_OE				0x02
@@ -141,7 +155,7 @@ union lsljtag_cmd_word {
 	} split;
 	union {
 		struct {
-			uint16_t is_read : 1;
+			uint16_t is_write : 1;
 			uint16_t reserved : 9;
 			uint16_t op : 6;
 		} probe_mem_rw; // Probe memory RW (Opcode = 0x01)
@@ -285,6 +299,44 @@ static int lsljtag_impl_send_recv(bool do_recv)
 }
 
 /**
+ * @brief Loongson EJTAG internally operates at 15MHz by default. You can only divide the frequency 
+ * down by factor of powers of 2. This function is used to search an appropriate division factor and
+ * the resulting JTAG clock speed after divison for target functions.
+ * 
+ * @param target_khz Target JTAG clock speed to fit onto
+ * @param result_khz Resulting JTAG clock speed that the probe can actually support. May be NULL.
+ * @param result_div The division factor to write into the device. May be NULL.
+ */
+static void lsljtag_util_calc_jtag_freq(int target_khz, int *result_khz, int *result_div)
+{
+	int freq[] = { 150000, 75000, 3750, 1875, 938, 469, 235, 118, 58, 30, 15, 8, 4, 2, 1 };
+	int ret_khz = freq[ARRAY_SIZE(freq) - 1], ret_div = (1 << (ARRAY_SIZE(freq) - 1));
+
+	if (target_khz > freq[0]) {
+		ret_khz = freq[0];
+		ret_div = 1;
+	} else {
+		for (size_t i = 1; i < ARRAY_SIZE(freq); ++i) {
+			if (freq[i] <= target_khz && freq[i - 1] > target_khz) {
+				ret_khz = freq[i];
+				ret_div = 1 << i;
+			}
+		}
+	}
+
+	// TODO: change to DEBUG
+	LOG_INFO(LOG_PREFIX "JTAG Freq target_khz=%" PRId32 " result_khz=%" PRId32 " result_div=%" PRId32,
+		  target_khz, ret_khz, ret_div);
+
+	if (result_div != NULL) {
+		*result_div = ret_div;
+	}
+	if (result_khz != NULL) {
+		*result_khz = ret_khz;
+	}
+}
+
+/**
  * @brief Read probe firmware version.
  * @param out On success, probe firmware version will be written to the location
  * 	      pointed by the pointer.
@@ -387,6 +439,44 @@ int lsljtag_cmd_ir_dr_scan(bool is_ir, bool buffer_tdo, bool return_buffer,
 }
 
 /**
+ * @brief The original implementation of Loongson's debug probe is an FPGA running a MIPS soft core.
+ * Some configuration are variables in the processor, some are registers accessible via MMIO registers
+ * of the processor core. This memory RW primitive is mostly used to do configuration changes.
+ * Modern implementation is no longer this case but the protocol persisted.
+ * 
+ * @param is_write true for a write access, false for a read.
+ * @param addr 32 bit address to write to.
+ * @param data pointer to data that will be read (in a write) or rewritten (in a read).
+ * @return int Error code.
+ */
+int lsljtag_cmd_probe_mem_rw(bool is_write, uint32_t addr, uint32_t *data)
+{
+	union lsljtag_cmd_word cmd = {
+		.probe_mem_rw = {
+			.is_write = is_write,
+			.op = OP_PROBE_MEM_RW
+		}
+	};
+
+	lsljtag_impl_queue_tx(&cmd, sizeof(cmd));
+	lsljtag_impl_queue_tx(&addr, sizeof(addr));
+	if (is_write) {
+		lsljtag_impl_queue_tx(data, sizeof(*data));
+	}
+
+	int err = lsljtag_impl_send_recv(!is_write);
+	if (err != ERROR_OK) {
+		return err;
+	}
+
+	if (!is_write) {
+		memcpy(data, usb_buf, sizeof(*data));
+	}
+
+	return ERROR_OK;
+}
+
+/**
  * @} // Loongson LJTAG internal communication
  */
 
@@ -471,12 +561,14 @@ static int lsljtag_init(void)
 	}
 
 	// FIXME: fetch correct OUT EP MPS
-	mps_tx = 64;
-	mps_rx = 64;
-
-	// FIXME: delete after test
+	mps_tx = 512;
+	mps_rx = 512;
+	
 	uint32_t ver;
-	assert(lsljtag_cmd_read_ver(&ver) == ERROR_OK);
+	if (lsljtag_cmd_read_ver(&ver) != ERROR_OK) {
+		LOG_ERROR("Cannot initiate probe communication correctly (Can't read version)");
+		return ERROR_JTAG_DEVICE_ERROR;
+	}
 	LOG_INFO(LOG_PREFIX "Version = %08X", ver);
 
 	return ERROR_OK;
@@ -503,6 +595,57 @@ static int lsljtag_quit(void)
 		free(usb_buf);
 		usb_buf = NULL;
 	}
+	return ERROR_OK;
+}
+
+/**
+ * @brief Set SRST(BRST in LJTAG's pinout) and TRST pin levels.
+ */
+static int lsljtag_reset(int srst, int trst)
+{
+	lsljtag_cmd_io_manip(IO_BRST, !!srst);
+	lsljtag_cmd_io_manip(IO_TRST, !!trst);
+	return ERROR_OK;
+}
+
+/**
+ * @brief Set probe clock speed. 
+ * 
+ * @param speed Clock divisor
+ * @return int error code
+ */
+static int lsljtag_speed(int speed)
+{
+	uint32_t regw = 0x00010000 | speed;
+
+	return lsljtag_cmd_probe_mem_rw(true, MEM_REG_JTAGCLK, &regw);
+}
+
+/**
+ * @brief Convert the clock divisor to the actual JTAG clock speed
+ * 
+ * @param speed Desired target speed 
+ * @param khz Output of actual speed
+ * @return int error code
+ */
+static int lsljtag_speed_div(int speed, int *khz)
+{
+	*khz = 15000 / speed;
+	return ERROR_OK;
+}
+
+/**
+ * @brief Convert the desired kHz JTAG clock speed to the clock divisor that the probe supports.
+ * The actual speed will be (15MHz/2^n) where n makes the resulting clock speed not greater than
+ * the desired speed.
+ * 
+ * @param khz Input, desired kHz JTAG clock speed
+ * @param jtag_speed Output, clock divisor
+ * @return int 
+ */
+static int lsljtag_khz(int khz, int *jtag_speed)
+{
+	lsljtag_util_calc_jtag_freq(khz, NULL, jtag_speed);
 	return ERROR_OK;
 }
 
@@ -610,18 +753,39 @@ int lsljtag_iface_execute_queue(struct jtag_command *cmd_queue)
  * @{
  */
 
+COMMAND_HANDLER(lsljtag_cmdhandler_version)
+{
+	uint32_t ver;
+	int rc = lsljtag_cmd_read_ver(&ver);
+	if (rc != ERROR_OK) {
+		ver = 0;
+		LOG_ERROR(LOG_PREFIX "cannot read probe firmware version");
+	}
+	command_print(CMD, "%" PRIx32, ver);
+	return ERROR_OK;
+}
 
- // TODO: Dont commit this. this is a stub
-// static const struct command_registration loongarch_ljtag_command_handlers[] = {
-// 	{
-// 		.name = "use_fastdata",
-// 		.handler = NULL, // TODO
-// 		.mode = COMMAND_ANY,
-// 		.usage = "['enable'|'disable']",
-// 		.help = "Specify whether to use FASTDATA for LJTAG accesses (enabled by default)",
-// 	},
-// 	COMMAND_REGISTRATION_DONE
-// };
+static const struct command_registration loongson_ljtag_subcommand_handlers[] = {
+	{
+		.name = "version",
+		.handler = lsljtag_cmdhandler_version,
+		.mode = COMMAND_ANY,
+		.usage = "",
+		.help = "Prints the probe firmware version",
+	},
+	COMMAND_REGISTRATION_DONE
+};
+
+static const struct command_registration loongson_ljtag_command_handlers[] = {
+	{
+		.name = "loongson-ljtag",
+		.mode = COMMAND_ANY,
+		.help = "Loongson LJTAG debug probe actions",
+		.usage = "<cmd>",
+		.chain = loongson_ljtag_subcommand_handlers,
+	},
+	COMMAND_REGISTRATION_DONE
+};
 
 /**
  * @} // Loongson LJTAG related commands
@@ -636,14 +800,14 @@ struct adapter_driver loongson_ljtag_adapter_driver = {
 	.name = "loongson-ljtag",
 	.transport_ids = TRANSPORT_JTAG,
 	.transport_preferred_id = TRANSPORT_JTAG,
-	.commands = NULL,
+	.commands = loongson_ljtag_command_handlers,
 
 	.init = lsljtag_init,
 	.quit = lsljtag_quit,
-	.reset = NULL,
-	.speed = NULL,
-	.khz = NULL,
-	.speed_div = NULL,
+	.reset = lsljtag_reset,
+	.speed = lsljtag_speed,
+	.khz = lsljtag_khz,
+	.speed_div = lsljtag_speed_div,
 	.config_trace = NULL,
 	.poll_trace = NULL,
 
