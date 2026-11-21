@@ -52,4 +52,8 @@ int loongarch64_dbgm_exec(struct loongarch_ljtag *ljtag_info,
 int loongarch64_dbgm_read_regs(struct loongarch_ljtag *ljtag_info,
 				uint64_t *regs);
 
+int loongarch64_dbgm_read_csr(struct loongarch_ljtag *ljtag_info, uint32_t csr, uint64_t *value);
+
+int loongarch64_dbgm_write_csr(struct loongarch_ljtag *ljtag_info, uint32_t csr, uint64_t value);
+
 #endif /* OPENOCD_TARGET_LOONGARCH64_DBGM */

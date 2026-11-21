@@ -104,6 +104,7 @@ struct loongarch64_core_reg {
 						LOONG64_LU12I_W(rd, ((word & 0xfffff000u) >> 12))
 #define LOONG64_LI_D(rd, dword)			LOONG64_LU12I_W(rd, ((dword & 0xfffff000u) >> 12)), \
 						LOONG64_ORI(rd, rd, (dword & 0xfffu)), \
+						LOONG64_LU32I_D(rd, ((dword & 0xfffff00000000u) >> 32)), \
 						LOONG64_LU52I_D(rd, rd, ((dword & 0xfff0000000000000u) >> 52))
 
 #endif /* OPENOCD_TARGET_LOONGARCH64_H */

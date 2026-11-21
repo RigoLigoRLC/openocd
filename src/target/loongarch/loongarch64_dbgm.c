@@ -432,7 +432,7 @@ static int loongarch64_dbgm_read_u64(struct loongarch_ljtag *ljtag_info, uint64_
 		/* Restore $r21 from CSR.DSAVE */
 		LOONG64_CSRRD(21, 0x502),
 		/* b start */
-		LOONG64_B(NEG26(11)),
+		LOONG64_B(NEG26(12)),
 	};
 
 	uint64_t param_in[1] = { addr };
@@ -460,7 +460,7 @@ static int loongarch64_dbgm_read_u32(struct loongarch_ljtag *ljtag_info, uint64_
 		/* Restore $r21 from CSR.DSAVE */
 		LOONG64_CSRRD(21, 0x502),
 		/* b start */
-		LOONG64_B(NEG26(11)),
+		LOONG64_B(NEG26(12)),
 	};
 
 	int retval;
@@ -492,7 +492,7 @@ static int loongarch64_dbgm_read_u16(struct loongarch_ljtag *ljtag_info, uint64_
 		/* Restore $r21 from CSR.DSAVE */
 		LOONG64_CSRRD(21, 0x502),
 		/* b start */
-		LOONG64_B(NEG26(11)),
+		LOONG64_B(NEG26(12)),
 	};
 
 	int retval;
@@ -524,7 +524,7 @@ static int loongarch64_dbgm_read_u8(struct loongarch_ljtag *ljtag_info, uint64_t
 		/* Restore $r21 from CSR.DSAVE */
 		LOONG64_CSRRD(21, 0x502),
 		/* b start */
-		LOONG64_B(NEG26(11)),
+		LOONG64_B(NEG26(12)),
 	};
 
 	int retval;
@@ -634,7 +634,7 @@ static int loongarch64_dbgm_write_u64(struct loongarch_ljtag *ljtag_info, uint64
 		/* Restore $r21 from CSR.DSAVE */
 		LOONG64_CSRRD(21, 0x502),
 		/* b start */
-		LOONG64_B(NEG26(12)),
+		LOONG64_B(NEG26(13)),
 	};
 
 	uint64_t param_in[2] = { addr, *buf };
@@ -666,7 +666,7 @@ static int loongarch64_dbgm_write_u32(struct loongarch_ljtag *ljtag_info, uint64
 		/* Restore $r21 from CSR.DSAVE */
 		LOONG64_CSRRD(21, 0x502),
 		/* b start */
-		LOONG64_B(NEG26(12)),
+		LOONG64_B(NEG26(13)),
 	};
 
 	uint64_t param_in[2] = { addr, *buf };
@@ -698,7 +698,7 @@ static int loongarch64_dbgm_write_u16(struct loongarch_ljtag *ljtag_info, uint64
 		/* Restore $r21 from CSR.DSAVE */
 		LOONG64_CSRRD(21, 0x502),
 		/* b start */
-		LOONG64_B(NEG26(12)),
+		LOONG64_B(NEG26(13)),
 	};
 
 	uint64_t param_in[2] = { addr, *buf };
@@ -730,7 +730,7 @@ static int loongarch64_dbgm_write_u8(struct loongarch_ljtag *ljtag_info, uint64_
 		/* Restore $r21 from CSR.DSAVE */
 		LOONG64_CSRRD(21, 0x502),
 		/* b start */
-		LOONG64_B(NEG26(12)),
+		LOONG64_B(NEG26(13)),
 	};
 
 	uint64_t param_in[2] = { addr, *buf };
@@ -740,7 +740,7 @@ static int loongarch64_dbgm_write_u8(struct loongarch_ljtag *ljtag_info, uint64_
 }
 
 static int loongarch64_dbgm_write_mem64(struct loongarch_ljtag *ljtag_info, uint64_t addr,
-					 unsigned int count, uint64_t *buf)
+					unsigned int count, uint64_t *buf)
 {
 	int retval = ERROR_OK;
 
@@ -753,7 +753,7 @@ static int loongarch64_dbgm_write_mem64(struct loongarch_ljtag *ljtag_info, uint
 }
 
 static int loongarch64_dbgm_write_mem32(struct loongarch_ljtag *ljtag_info, uint64_t addr,
-					 unsigned int count, uint32_t *buf)
+					unsigned int count, uint32_t *buf)
 {
 	int retval = ERROR_OK;
 
@@ -766,7 +766,7 @@ static int loongarch64_dbgm_write_mem32(struct loongarch_ljtag *ljtag_info, uint
 }
 
 static int loongarch64_dbgm_write_mem16(struct loongarch_ljtag *ljtag_info, uint64_t addr,
-					 unsigned int count, uint16_t *buf)
+					unsigned int count, uint16_t *buf)
 {
 	int retval = ERROR_OK;
 
@@ -862,10 +862,69 @@ int loongarch64_dbgm_read_regs(struct loongarch_ljtag *ljtag_info,
 		/* Restore $r1 from param_out[1] */
 		LOONG64_LD_D(1, 1, 0x08),
 		/* b start */
-		LOONG64_B(NEG26(43)),
+		LOONG64_B(NEG26(44)),
 	};
 
 	LOG_DEBUG("enter loong64_dbgm_exec");
 	return loongarch64_dbgm_exec(ljtag_info, ARRAY_SIZE(code), code, 0,
 		NULL, LOONG64_NUM_REGS, regs);
+}
+
+int loongarch64_dbgm_read_csr(struct loongarch_ljtag *ljtag_info, uint32_t csr, uint64_t *value)
+{
+	const uint32_t code[] = {
+		/* Write $r1 to CSR.DSAVE */
+		LOONG64_CSRWR(1, 0x502),
+		/* Use $r1 as output area pointer */
+		LOONG64_LI_D(1, LOONG64_DBGM_PARAM_OUT),
+		/* Save $r2 to param_out[1] */
+		LOONG64_ST_D(2, 1, 0x8),
+		/* Read value of desired CSR into $r2 */
+		LOONG64_CSRRD(2, csr),
+		/* Save the CSR value to param_out[0] */
+		LOONG64_ST_D(2, 1, 0x0),
+		/* Restore $r2 from param_out[1] */
+		LOONG64_LD_D(2, 1, 0x8),
+		/* Restore $r1 from CSR.DSAVE */
+		LOONG64_CSRRD(1, 0x502),
+		/* b start */
+		LOONG64_B(NEG26(10)),
+	};
+
+	int retval;
+	uint64_t param_out[2];
+
+	retval = loongarch64_dbgm_exec(ljtag_info, ARRAY_SIZE(code), code, 0,
+		NULL, 2, param_out);
+	*value = param_out[0];
+	return retval;
+}
+
+int loongarch64_dbgm_write_csr(struct loongarch_ljtag *ljtag_info, uint32_t csr, uint64_t value)
+{
+	const uint32_t code[] = {
+		/* Write $r1 to CSR.DSAVE */
+		LOONG64_CSRWR(1, 0x502),
+		/* Use $r1 as input area pointer */
+		LOONG64_LI_D(1, LOONG64_DBGM_PARAM_IN),
+		/* Save $r2 to param_in[1] */
+		LOONG64_ST_D(2, 1, 0x8),
+		/* Read the value to be written to CSR from param_in[0] */
+		LOONG64_LD_D(2, 1, 0x0),
+		/* Read value of desired CSR into $r2 */
+		LOONG64_CSRWR(2, csr),
+		/* Restore $r2 from param_in[1] */
+		LOONG64_LD_D(2, 1, 0x8),
+		/* Restore $r1 from CSR.DSAVE */
+		LOONG64_CSRRD(1, 0x502),
+		/* b start */
+		LOONG64_B(NEG26(10)),
+	};
+
+	int retval;
+	uint64_t param_in[2] = { value, 0 };
+
+	retval = loongarch64_dbgm_exec(ljtag_info, ARRAY_SIZE(code), code, 2,
+		param_in, 0, NULL);
+	return retval;
 }

@@ -537,13 +537,126 @@ static int loongarch64_examine(struct target *target)
 	return ERROR_OK;
 }
 
-static const struct command_registration loongarch64_commands[] = {
+/*******************************************************************************
+ *       Target Commands
+ ******************************************************************************/
+
+/**
+ * @defgroup LoongArch64 specific commands
+ * @{
+ */
+
+COMMAND_HANDLER(loongarch64_csr_write)
+{
+	struct target *target = get_current_target(CMD_CTX);
+	struct loongarch64_common *loongarch64 = target->arch_info;
+	struct loongarch_ljtag *ljtag_info = &loongarch64->ljtag_info;
+	int retval;
+	uint32_t csr_num;
+	uint64_t csr_val;
+
+	if (target->state != TARGET_HALTED) {
+		LOG_TARGET_ERROR(target, "not halted");
+		return ERROR_TARGET_NOT_HALTED;
+	}
+
+	if (CMD_ARGC != 2) {
+		return ERROR_COMMAND_SYNTAX_ERROR;
+	}
+
+	COMMAND_PARSE_NUMBER(u32, CMD_ARGV[0], csr_num);
+	COMMAND_PARSE_NUMBER(u64, CMD_ARGV[1], csr_val);
+
+	if (csr_num > 0x3FFF) {
+		LOG_ERROR("CSR to read (0x%" PRIx32 ") is invalid in LoongArch", csr_num);
+		return ERROR_COMMAND_SYNTAX_ERROR;
+	}
+
+	retval = loongarch64_dbgm_write_csr(ljtag_info, csr_num, csr_val);
+	if (retval != ERROR_OK) {
+		LOG_ERROR("CSR write failed (%" PRId32 ")", retval);
+		return retval;
+	}
+	
+	return ERROR_OK;
+}
+
+COMMAND_HANDLER(loongarch64_csr_read)
+{
+	struct target *target = get_current_target(CMD_CTX);
+	struct loongarch64_common *loongarch64 = target->arch_info;
+	struct loongarch_ljtag *ljtag_info = &loongarch64->ljtag_info;
+	int retval;
+	uint32_t csr_num;
+	uint64_t csr_val;
+
+	if (target->state != TARGET_HALTED) {
+		LOG_TARGET_ERROR(target, "not halted");
+		return ERROR_TARGET_NOT_HALTED;
+	}
+
+	if (CMD_ARGC != 1) {
+		return ERROR_COMMAND_SYNTAX_ERROR;
+	}
+
+	COMMAND_PARSE_NUMBER(u32, CMD_ARGV[0], csr_num);
+
+	if (csr_num > 0x3FFF) {
+		LOG_ERROR("CSR to read (0x%" PRIx32 ") is invalid in LoongArch", csr_num);
+		return ERROR_COMMAND_SYNTAX_ERROR;
+	}
+
+	retval = loongarch64_dbgm_read_csr(ljtag_info, csr_num, &csr_val);
+	if (retval != ERROR_OK) {
+		LOG_ERROR("CSR read failed (%" PRId32 ")", retval);
+		return retval;
+	}
+
+	command_print(CMD, "0x%" PRIx64, csr_val);
+	return ERROR_OK;
+}
+
+static const struct command_registration csr_commands[] = {
+	{
+		.name = "write",
+		.handler = loongarch64_csr_write,
+		.usage = "<csr number> <value>"
+	},
+	{
+		.name = "read",
+		.handler = loongarch64_csr_read,
+		.usage = "<csr number>"
+	},
+	COMMAND_REGISTRATION_DONE
+};
+
+/**
+ * @}
+ */
+
+static const struct command_registration loongarch64_subcommands[] = {
+	{
+		.name = "csr",
+		.chain = csr_commands,
+		.usage = "read|write",
+		.help = "For manipulating LoongArch CSR registers"
+	},
+	// TODO: other commands for LoongArch64 targets
 	{
 		/* It has nowhere else to go, wired on LoongArch64 handler table for convenience */
 		.chain = loongarch_ljtag_command_handlers
 	},
 	COMMAND_REGISTRATION_DONE
-	// TODO: commands for LoongArch64 targets
+};
+
+static const struct command_registration loongarch64_commands[] = {
+	{
+		.name = "loongarch64",
+		.chain = loongarch64_subcommands,
+		.usage = "<cmd>",
+		.help = "Performing LoongArch64 target specific manipulations"
+	},
+	COMMAND_REGISTRATION_DONE
 };
 
 struct target_type loongarch64_target = {

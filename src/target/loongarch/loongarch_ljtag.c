@@ -181,7 +181,6 @@ static void loongarch_ljtag_drscan_32_queued(struct loongarch_ljtag *ljtag_info,
 
 int loongarch_ljtag_drscan_32(struct loongarch_ljtag *ljtag_info, uint32_t *data, bool readback)
 {
-	// TODO: bool readback
 	uint8_t scan_in[4];
 	loongarch_ljtag_drscan_32_queued(ljtag_info, *data, scan_in);
 
