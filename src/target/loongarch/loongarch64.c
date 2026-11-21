@@ -249,7 +249,7 @@ static int loongarch64_poll(struct target *target)
 
 	// Read Control register
 	loongarch_ljtag_add_write_ir(ljtag_info, LJTAG_INST_CONTROL);
-	loongarch_ljtag_drscan_32(ljtag_info, &ljtag_ctrl);
+	loongarch_ljtag_drscan_32(ljtag_info, &ljtag_ctrl, true);
 
 	// The MIPS counterpart tries to detect Rocc bit here but LoongArch
 	// processors don't seem to have implemented a reset mechanism from
@@ -368,7 +368,7 @@ static int loongarch64_resume(struct target *target, bool current,
 	if (retval != ERROR_OK)
 		return retval;
 
-        
+	
 
 	return ERROR_OK;
 }

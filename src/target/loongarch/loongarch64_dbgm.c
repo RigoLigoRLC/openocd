@@ -43,6 +43,10 @@
 
 #define STACK_DEPTH	32
 
+/**
+ * @brief Context block used by OpenOCD when trying to execute debug miniprograms on target.
+ * 
+ */
 struct loongarch64_dbgm_context {
 	uint64_t *local_iparam;
 	unsigned int num_iparam;
@@ -66,7 +70,7 @@ static int wait_for_dbgm_rw(struct loongarch_ljtag *ljtag_info, uint32_t *ctrl)
 		loongarch_ljtag_add_write_ir(ljtag_info, LJTAG_INST_CONTROL);
 		ljtag_ctrl = LJTAG_CTRL_PR | LJTAG_CTRL_PEN |
 			     LJTAG_CTRL_PROBTRAP;
-		retval = loongarch_ljtag_drscan_32(ljtag_info, &ljtag_ctrl);
+		retval = loongarch_ljtag_drscan_32(ljtag_info, &ljtag_ctrl, true);
 		if (retval != ERROR_OK) {
 			return retval;
 		}
@@ -111,7 +115,7 @@ static int loongarch64_dbgm_handle_access(struct loongarch_ljtag *ljtag_info,
 		} else {
 			/* Send the data out */
 			loongarch_ljtag_add_write_ir(ljtag_info, LJTAG_INST_DATA);
-			retval = loongarch_ljtag_drscan_64(ljtag_info, data);
+			retval = loongarch_ljtag_drscan_64(ljtag_info, data, false);
 			if (retval != ERROR_OK) {
 				return retval;
 			}
@@ -119,19 +123,38 @@ static int loongarch64_dbgm_handle_access(struct loongarch_ljtag *ljtag_info,
 			/* Finish the memory access */
 			ljtag_ctrl = LJTAG_CTRL_PEN | LJTAG_CTRL_PROBTRAP;
 			loongarch_ljtag_add_write_ir(ljtag_info, LJTAG_INST_CONTROL);
-			retval = loongarch_ljtag_drscan_32(ljtag_info, &ljtag_ctrl);
+			retval = loongarch_ljtag_drscan_32(ljtag_info, &ljtag_ctrl, false);
 		}
 	} else {
 		if (use_fastdata) {
-			retval = ERROR_NOT_IMPLEMENTED;
+			/* Receive the data via FASTDATA */
+			loongarch_ljtag_add_write_ir(ljtag_info, LJTAG_INST_FASTDATA);
+			retval = loongarch_ljtag_fastdata_scan_64(ljtag_info, data, false, true);
 		} else {
-			retval = ERROR_NOT_IMPLEMENTED;
+			/* Receive the data from DATA */
+			loongarch_ljtag_add_write_ir(ljtag_info, LJTAG_INST_DATA);
+			retval = loongarch_ljtag_drscan_64(ljtag_info, data, true);
+			if (retval != ERROR_OK) {
+				return retval;
+			}
+
+			/* Finish the memory access */
+			ljtag_ctrl = LJTAG_CTRL_PEN | LJTAG_CTRL_PROBTRAP;
+			loongarch_ljtag_add_write_ir(ljtag_info, LJTAG_INST_CONTROL);
+			retval = loongarch_ljtag_drscan_32(ljtag_info, &ljtag_ctrl, false);
 		}
 	}
 
 	return retval;
 }
 
+/**
+ * @brief Handles a read access request from CPU.
+ * 
+ * @param ctx context block
+ * @param address address that the CPU is trying to read from
+ * @return int error code
+ */
 static int loongarch64_dbgm_exec_read(struct loongarch64_dbgm_context *ctx, uint64_t address) {
 	struct loongarch_ljtag *ljtag_info = ctx->ljtag_info;
 	unsigned int offset;
@@ -200,6 +223,14 @@ static int loongarch64_dbgm_exec_read(struct loongarch64_dbgm_context *ctx, uint
 	return jtag_execute_queue();
 }
 
+
+/**
+ * @brief Handles a write access request from CPU.
+ * 
+ * @param ctx context block
+ * @param address address that the CPU is trying to read from
+ * @return int error code
+ */
 static int loongarch64_dbgm_exec_write(struct loongarch64_dbgm_context *ctx, uint64_t address) {
 	struct loongarch_ljtag *ljtag_info = ctx->ljtag_info;
 	unsigned int offset;
@@ -209,7 +240,7 @@ static int loongarch64_dbgm_exec_write(struct loongarch64_dbgm_context *ctx, uin
 
 	/* Get the data written by CPU */
 	loongarch_ljtag_add_write_ir(ljtag_info, LJTAG_INST_DATA);
-	retval = loongarch_ljtag_drscan_64(ljtag_info, &data);
+	retval = loongarch_ljtag_drscan_64(ljtag_info, &data, true);
 	if (retval != ERROR_OK) {
 		return retval;
 	}
@@ -217,12 +248,11 @@ static int loongarch64_dbgm_exec_write(struct loongarch64_dbgm_context *ctx, uin
 	/* Finish the memory access */
 	ljtag_ctrl = ljtag_info->ljtag_ctrl & ~LJTAG_CTRL_PR;
 	loongarch_ljtag_add_write_ir(ljtag_info, LJTAG_INST_CONTROL);
-	retval = loongarch_ljtag_drscan_32(ljtag_info, &ljtag_ctrl);
+	retval = loongarch_ljtag_drscan_32(ljtag_info, &ljtag_ctrl, false);
 	if (retval != ERROR_OK) {
 		return retval;
 	}
 
-	// jtag_add_clocks(5);
 	retval = jtag_execute_queue();
 	if (retval != ERROR_OK) {
 		return retval;
@@ -324,7 +354,7 @@ int loongarch64_dbgm_exec(struct loongarch_ljtag *ljtag_info,
 		}
 
 		loongarch_ljtag_add_write_ir(ljtag_info, LJTAG_INST_ADDRESS);
-		loongarch_ljtag_drscan_64(ljtag_info, &address);
+		loongarch_ljtag_drscan_64(ljtag_info, &address, true);
 		LOG_DEBUG("-> %08" PRIx64, address);
 
 		/* Since the memory logic is taken from MIPS code, we also inherit its access
@@ -610,10 +640,10 @@ static int loongarch64_dbgm_write_u64(struct loongarch_ljtag *ljtag_info, uint64
 	uint64_t param_in[2] = { addr, *buf };
 
 	return loongarch64_dbgm_exec(ljtag_info, ARRAY_SIZE(code), code,
-		ARRAY_SIZE(param_in), param_in, 1, buf);
+		ARRAY_SIZE(param_in), param_in, 0, NULL);
 }
 
-static int loongarch64_dbgm_write_u32(struct loongarch_ljtag *ljtag_info, uint64_t addr, uint64_t *buf) {
+static int loongarch64_dbgm_write_u32(struct loongarch_ljtag *ljtag_info, uint64_t addr, uint32_t *buf) {
 	const uint32_t code[] = {
 		/* Write $r21 to CSR.DSAVE */
 		LOONG64_CSRWR(21, 0x502),
@@ -642,10 +672,10 @@ static int loongarch64_dbgm_write_u32(struct loongarch_ljtag *ljtag_info, uint64
 	uint64_t param_in[2] = { addr, *buf };
 
 	return loongarch64_dbgm_exec(ljtag_info, ARRAY_SIZE(code), code,
-		ARRAY_SIZE(param_in), param_in, 1, buf);
+		ARRAY_SIZE(param_in), param_in, 0, NULL);
 }
 
-static int loongarch64_dbgm_write_u16(struct loongarch_ljtag *ljtag_info, uint64_t addr, uint64_t *buf) {
+static int loongarch64_dbgm_write_u16(struct loongarch_ljtag *ljtag_info, uint64_t addr, uint16_t *buf) {
 	const uint32_t code[] = {
 		/* Write $r21 to CSR.DSAVE */
 		LOONG64_CSRWR(21, 0x502),
@@ -674,10 +704,10 @@ static int loongarch64_dbgm_write_u16(struct loongarch_ljtag *ljtag_info, uint64
 	uint64_t param_in[2] = { addr, *buf };
 
 	return loongarch64_dbgm_exec(ljtag_info, ARRAY_SIZE(code), code,
-		ARRAY_SIZE(param_in), param_in, 1, buf);
+		ARRAY_SIZE(param_in), param_in, 0, NULL);
 }
 
-static int loongarch64_dbgm_write_u8(struct loongarch_ljtag *ljtag_info, uint64_t addr, uint64_t *buf) {
+static int loongarch64_dbgm_write_u8(struct loongarch_ljtag *ljtag_info, uint64_t addr, uint8_t *buf) {
 	const uint32_t code[] = {
 		/* Write $r21 to CSR.DSAVE */
 		LOONG64_CSRWR(21, 0x502),
@@ -706,7 +736,7 @@ static int loongarch64_dbgm_write_u8(struct loongarch_ljtag *ljtag_info, uint64_
 	uint64_t param_in[2] = { addr, *buf };
 
 	return loongarch64_dbgm_exec(ljtag_info, ARRAY_SIZE(code), code,
-		ARRAY_SIZE(param_in), param_in, 1, buf);
+		ARRAY_SIZE(param_in), param_in, 0, NULL);
 }
 
 static int loongarch64_dbgm_write_mem64(struct loongarch_ljtag *ljtag_info, uint64_t addr,
@@ -723,7 +753,7 @@ static int loongarch64_dbgm_write_mem64(struct loongarch_ljtag *ljtag_info, uint
 }
 
 static int loongarch64_dbgm_write_mem32(struct loongarch_ljtag *ljtag_info, uint64_t addr,
-					 unsigned int count, uint64_t *buf)
+					 unsigned int count, uint32_t *buf)
 {
 	int retval = ERROR_OK;
 
@@ -736,7 +766,7 @@ static int loongarch64_dbgm_write_mem32(struct loongarch_ljtag *ljtag_info, uint
 }
 
 static int loongarch64_dbgm_write_mem16(struct loongarch_ljtag *ljtag_info, uint64_t addr,
-					 unsigned int count, uint64_t *buf)
+					 unsigned int count, uint16_t *buf)
 {
 	int retval = ERROR_OK;
 
@@ -749,7 +779,7 @@ static int loongarch64_dbgm_write_mem16(struct loongarch_ljtag *ljtag_info, uint
 }
 
 static int loongarch64_dbgm_write_mem8(struct loongarch_ljtag *ljtag_info, uint64_t addr,
-					unsigned int count, uint64_t *buf)
+					unsigned int count, uint8_t *buf)
 {
 	int retval = ERROR_OK;
 

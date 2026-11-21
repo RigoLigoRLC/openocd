@@ -53,13 +53,12 @@ extern const struct command_registration loongarch_ljtag_command_handlers[];
 
 void loongarch_ljtag_add_write_ir(struct loongarch_ljtag *ljtag_info, uint32_t new_instr);
 
-int loongarch_ljtag_drscan_64(struct loongarch_ljtag *ljtag_info, uint64_t *data);
+int loongarch_ljtag_drscan_64(struct loongarch_ljtag *ljtag_info, uint64_t *data, bool readback);
 int loongarch_ljtag_fastdata_scan_64(struct loongarch_ljtag *ljtag_info,
 				     uint64_t *data,
 				     bool pr,
 				     bool readback);
-void loongarch_ljtag_drscan_32_out(struct loongarch_ljtag *ljtag_info, uint32_t data);
-int loongarch_ljtag_drscan_32(struct loongarch_ljtag *ljtag_info, uint32_t *data);
+int loongarch_ljtag_drscan_32(struct loongarch_ljtag *ljtag_info, uint32_t *data, bool readback);
 int loongarch_ljtag_fastdata_scan_32(struct loongarch_ljtag *ljtag_info,
 				     uint32_t *data,
 				     bool pr,

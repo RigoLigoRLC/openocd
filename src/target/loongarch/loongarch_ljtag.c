@@ -51,9 +51,17 @@ void loongarch_ljtag_add_write_ir(struct loongarch_ljtag *ljtag_info, uint32_t n
 	}
 }
 
-int loongarch_ljtag_drscan_64(struct loongarch_ljtag *ljtag_info, uint64_t *data)
+/**
+ * @brief Execute a DR scan with 64 bit data, provided you've already queued an IR scan that set it
+ * to DATA, or IR is already set to DATA.
+ * 
+ * @param ljtag_info LJTAG context object
+ * @param data pointer to a 64-bit data. Overwritten with DATA register readback if enabled.
+ * @param readback whether you want DATA register be read back.
+ * @return int error code
+ */
+int loongarch_ljtag_drscan_64(struct loongarch_ljtag *ljtag_info, uint64_t *data, bool readback)
 {
-	// TODO: bool readback
 	struct jtag_tap *tap = ljtag_info->tap;
 	if (!tap) {
 		LOG_ERROR("ljtag_info->tap is NULL!");
@@ -67,7 +75,14 @@ int loongarch_ljtag_drscan_64(struct loongarch_ljtag *ljtag_info, uint64_t *data
 	field.num_bits = 64;
 	field.out_value = out;
 	buf_set_u64(out, 0, field.num_bits, *data);
-	field.in_value = in;
+
+	/* If TDO readback is not required, set in_value to NULL */
+	/* This can save Loongson LJTAG some processing time */
+	if (readback) {
+		field.in_value = in;
+	} else {
+		field.in_value = NULL;
+	}
 
 	jtag_add_dr_scan(tap, 1, &field, TAP_IDLE);
 	retval = jtag_execute_queue();
@@ -76,7 +91,9 @@ int loongarch_ljtag_drscan_64(struct loongarch_ljtag *ljtag_info, uint64_t *data
 		return retval;
 	}
 
-	*data = buf_get_u64(field.in_value, 0, 64);
+	if (readback) {
+		*data = buf_get_u64(field.in_value, 0, 64);
+	}
 
 	keep_alive();
 
@@ -162,13 +179,7 @@ static void loongarch_ljtag_drscan_32_queued(struct loongarch_ljtag *ljtag_info,
 	keep_alive();
 }
 
-// FIXME: is this thing actually useful?
-void loongarch_ljtag_drscan_32_out(struct loongarch_ljtag *ljtag_info, uint32_t data)
-{
-	loongarch_ljtag_drscan_32_queued(ljtag_info, data, NULL);
-}
-
-int loongarch_ljtag_drscan_32(struct loongarch_ljtag *ljtag_info, uint32_t *data)
+int loongarch_ljtag_drscan_32(struct loongarch_ljtag *ljtag_info, uint32_t *data, bool readback)
 {
 	// TODO: bool readback
 	uint8_t scan_in[4];
@@ -189,7 +200,7 @@ int loongarch_ljtag_get_idcode(struct loongarch_ljtag *ljtag_info)
 	loongarch_ljtag_add_write_ir(ljtag_info, LJTAG_INST_IDCODE);
 
 	ljtag_info->idcode = 0;
-	return loongarch_ljtag_drscan_32(ljtag_info, &ljtag_info->idcode);
+	return loongarch_ljtag_drscan_32(ljtag_info, &ljtag_info->idcode, true);
 }
 
 int loongarch_ljtag_init(struct loongarch_ljtag *ljtag_info)
@@ -226,7 +237,7 @@ int loongarch_ljtag_enter_debug(struct loongarch_ljtag *ljtag_info)
 		/* set debug break bit */
 		ljtag_ctrl = LJTAG_CTRL_BREAK | LJTAG_CTRL_PR | LJTAG_CTRL_PEN
 			| LJTAG_CTRL_PROBTRAP;
-		loongarch_ljtag_drscan_32(ljtag_info, &ljtag_ctrl);
+		loongarch_ljtag_drscan_32(ljtag_info, &ljtag_ctrl, false);
 		
 		/* See if we stopped processor */
 		LOG_DEBUG("enter_debug: control=0x%08" PRIx32 "", ljtag_ctrl);

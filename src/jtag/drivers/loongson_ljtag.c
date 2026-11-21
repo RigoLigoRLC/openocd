@@ -544,7 +544,7 @@ int lsljtag_iface_execute_queue(struct jtag_command *cmd_queue)
 	// use it to generate IR/DR scans.
 	while (cmd) {
 		switch (cmd->type) {
-                case JTAG_SCAN:
+		case JTAG_SCAN:
 			LOG_DEBUG_IO(LOG_PREFIX "JTAG_SCAN");
 			scan_length = jtag_build_buffer(cmd->cmd.scan, (uint8_t **)&buffer);
 			if (scan_length % 32) {
@@ -569,34 +569,34 @@ int lsljtag_iface_execute_queue(struct jtag_command *cmd_queue)
 			}
 			free(buffer);
 			break;
-                case JTAG_TLR_RESET:
+		case JTAG_TLR_RESET:
 			LOG_ERROR(LOG_PREFIX "JTAG_TLR_RESET unsupported: No bit-banged JTAG support");
 			break;
-                case JTAG_RUNTEST:
+		case JTAG_RUNTEST:
 			LOG_ERROR(LOG_PREFIX "JTAG_RUNTEST unsupported: No bit-banged JTAG support");
 			break;
-                case JTAG_RESET:
+		case JTAG_RESET:
 			LOG_DEBUG_IO(LOG_PREFIX "JTAG_RESET TRST=%" PRIu32 " SRST=%" PRIu32,
 				cmd->cmd.reset->trst, cmd->cmd.reset->srst);
 			lsljtag_cmd_io_manip(IO_TRST, !cmd->cmd.reset->trst);
 			lsljtag_cmd_io_manip(IO_BRST, !cmd->cmd.reset->srst);
 			break;
-                case JTAG_PATHMOVE:
+		case JTAG_PATHMOVE:
 			LOG_ERROR(LOG_PREFIX "JTAG_PATHMOVE unsupported: No bit-banged JTAG support");
 			break;
-                case JTAG_SLEEP:
+		case JTAG_SLEEP:
 			LOG_DEBUG_IO(LOG_PREFIX "sleep %" PRIu32 "us", cmd->cmd.sleep->us);
 			jtag_sleep(cmd->cmd.sleep->us);
 			break;
-                case JTAG_STABLECLOCKS:
+		case JTAG_STABLECLOCKS:
 			LOG_ERROR(LOG_PREFIX "JTAG_STABLECLOCKS unsupported: No bit-banged JTAG support");
-                case JTAG_TMS:
+		case JTAG_TMS:
 			LOG_ERROR(LOG_PREFIX "JTAG_TMS unsupported: No bit-banged JTAG support");
 			break;
-                }
+		}
 
 		cmd = cmd->next;
-        }
+	}
 
 	return retval;
 }
