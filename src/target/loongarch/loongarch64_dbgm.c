@@ -609,8 +609,6 @@ int loongarch64_dbgm_read_mem(struct loongarch_ljtag *ljtag_info, uint64_t addr,
 	return ERROR_FAIL;
 }
 
-/* TODO: Memory writes */
-
 static int loongarch64_dbgm_write_u64(struct loongarch_ljtag *ljtag_info, uint64_t addr, uint64_t *buf) {
 	const uint32_t code[] = {
 		/* Write $r21 to CSR.DSAVE */

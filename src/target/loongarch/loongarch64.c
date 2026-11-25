@@ -455,8 +455,6 @@ static int loongarch64_write_memory(struct target *target, uint64_t address,
 	    || ((size == 2) && (address & 0x1)))
 		return ERROR_TARGET_UNALIGNED_ACCESS;
 
-	/* TODO: "Bulk" write */
-
 	if (size > 1) {
 		t = calloc(count, size);
 		if (!t) {
@@ -680,6 +678,12 @@ struct target_type loongarch64_target = {
 	.write_memory = loongarch64_write_memory,
 	.checksum_memory = NULL,
 	.blank_check_memory = NULL,
+
+	// TODO: MMU Support
+	// .virt2phys =
+	// .read_phys_memory =
+	// .write_phys_memory =
+	// .mmu =
 
 	.run_algorithm = NULL,
 

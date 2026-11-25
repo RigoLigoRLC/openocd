@@ -324,8 +324,7 @@ static void lsljtag_util_calc_jtag_freq(int target_khz, int *result_khz, int *re
 		}
 	}
 
-	// TODO: change to DEBUG
-	LOG_INFO(LOG_PREFIX "JTAG Freq target_khz=%" PRId32 " result_khz=%" PRId32 " result_div=%" PRId32,
+	LOG_DEBUG(LOG_PREFIX "JTAG Freq target_khz=%" PRId32 " result_khz=%" PRId32 " result_div=%" PRId32,
 		  target_khz, ret_khz, ret_div);
 
 	if (result_div != NULL) {
@@ -560,9 +559,9 @@ static int lsljtag_init(void)
 		goto out;
 	}
 
-	// FIXME: fetch correct OUT EP MPS
-	mps_tx = 512;
-	mps_rx = 512;
+	struct libusb_device *udev = libusb_get_device(priv.hdev);
+	mps_tx = libusb_get_max_packet_size(udev, LSLJTAG_OUT_EP);
+	mps_rx = libusb_get_max_packet_size(udev, LSLJTAG_IN_EP);
 	
 	uint32_t ver;
 	if (lsljtag_cmd_read_ver(&ver) != ERROR_OK) {
